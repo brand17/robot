@@ -12,6 +12,8 @@ extern void task_display(void*);
 void app_main(void)
 {
     xTaskCreate(&task_initI2C, "mpu_task", 2048, NULL, 5, NULL);
+    // task_initI2C(NULL);
     vTaskDelay(500/portTICK_PERIOD_MS);
+    // task_display(NULL);
     xTaskCreate(&task_display, "disp_task", 8192, NULL, 5, NULL);
 }
