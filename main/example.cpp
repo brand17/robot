@@ -12,6 +12,7 @@
 #include "MPU6050.h"
 #include "MPU6050_6Axis_MotionApps20.h"
 #include "sdkconfig.h"
+#include "iot_servo.h"
 
 #define PIN_SDA 21
 #define PIN_CLK 22
@@ -32,6 +33,7 @@ void task_initI2C(void *ignore) {
 	conf.sda_pullup_en = GPIO_PULLUP_ENABLE;
 	conf.scl_pullup_en = GPIO_PULLUP_ENABLE;
 	conf.master.clk_speed = 400000;
+    conf.clk_flags = 0;
 	ESP_ERROR_CHECK(i2c_param_config(I2C_NUM_0, &conf));
 	ESP_ERROR_CHECK(i2c_driver_install(I2C_NUM_0, I2C_MODE_MASTER, 0, 0, 0));
 	vTaskDelete(NULL);

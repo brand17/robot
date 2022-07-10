@@ -10,15 +10,17 @@
                 "${config:idf.espIdfPathWin}/components/**",
                 "${config:idf.espAdfPath}/components/**",
                 "${config:idf.espAdfPathWin}/components/**",
-                "${workspaceFolder}/**"
+                "${workspaceFolder}/**",
+                "C:/Users/FA.PROJECTOR-MSK/YandexDisk/Software/cpp/eigen/**"
             ],
             "browse": {
                 "path": [
                     "${config:idf.espIdfPath}/components",
                     "${config:idf.espIdfPathWin}/components",
-                    "${config:idf.espAdfPath}/components/**",
-                    "${config:idf.espAdfPathWin}/components/**",
-                    "${workspaceFolder}"
+                    "${config:idf.espAdfPath}/components",
+                    "${config:idf.espAdfPathWin}/components",
+                    "${workspaceFolder}",
+                    "C:/Users/FA.PROJECTOR-MSK/YandexDisk/Software/cpp/eigen"
                 ],
                 "limitSymbolsToIncludedHeaders": false
             }
