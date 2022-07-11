@@ -12,6 +12,9 @@
 #define PIN_SDA 21
 #define PIN_CLK 22
 
+#define GPIO_INPUT_IO_0 GPIO_NUM_33
+#define ESP_INTR_FLAG_DEFAULT 0
+
 #include <iostream>
 #include <Eigen/Dense>
  
@@ -25,6 +28,12 @@ extern "C" {
 
 extern void task_initI2C(void*);
 extern void task_display(void*);
+extern bool mpuInterrupt;
+
+static void IRAM_ATTR gpio_isr_handler(void* arg)
+{
+    mpuInterrupt = true;
+}
 
 void app_main(void)
 {
@@ -59,6 +68,16 @@ void app_main(void)
 
 	mpu.setDMPEnabled(true);
 
+    gpio_config_t io_conf = {};
+    io_conf.intr_type = GPIO_INTR_POSEDGE;
+    io_conf.pin_bit_mask = 1ULL<<GPIO_INPUT_IO_0;
+    io_conf.mode = GPIO_MODE_INPUT;
+    // io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE; // remove?
+    io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
+    gpio_config(&io_conf);
+    gpio_set_intr_type(GPIO_INPUT_IO_0, GPIO_INTR_ANYEDGE);
+    gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
+    gpio_isr_handler_add(GPIO_INPUT_IO_0, gpio_isr_handler, (void*) GPIO_INPUT_IO_0);
     // task_initI2C(NULL);
     vTaskDelay(500/portTICK_PERIOD_MS);
     // task_display(NULL);

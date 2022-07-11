@@ -25,6 +25,7 @@ uint16_t fifoCount;     // count of all bytes currently in FIFO
 uint8_t fifoBuffer[64]; // FIFO storage buffer
 uint8_t mpuIntStatus;   // holds actual interrupt status byte from MPU
 extern MPU6050 mpu;
+bool mpuInterrupt = false;
 
 void printAngles(){
     mpuIntStatus = mpu.getIntStatus();
@@ -54,7 +55,10 @@ void printAngles(){
 
 void task_display(void*){
 	while(1){
-        printAngles();
+        if (mpuInterrupt){
+            mpuInterrupt = false;
+            printAngles();
+        }
 	    //Best result is to match with DMP refresh rate
 	    // Its last value in components/MPU6050/MPU6050_6Axis_MotionApps20.h file line 310
 	    // Now its 0x13, which means DMP is refreshed with 10Hz rate
