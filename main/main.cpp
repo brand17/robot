@@ -21,7 +21,8 @@
 using Eigen::MatrixXd;
 
 MPU6050 mpu = MPU6050();
-bool mpuInterrupt = false;
+// bool mpuInterrupt = false;
+SemaphoreHandle_t xBinarySemaphore = xSemaphoreCreateBinary();
 
 extern "C" {
 	void app_main(void);
@@ -29,7 +30,9 @@ extern "C" {
 
 void IRAM_ATTR gpio_isr_handler(void* arg)
 {
-    mpuInterrupt = true;
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    xSemaphoreGiveFromISR(xBinarySemaphore, &xHigherPriorityTaskWoken);
+    // mpuInterrupt = true;
 }
 
 Quaternion q;           // [w, x, y, z]         quaternion container
@@ -68,14 +71,15 @@ void printAngles(){
 
 void task_display(void*){
 	while(1){
-        if (mpuInterrupt){
-            mpuInterrupt = false;
-            printAngles();
-        }
+        xSemaphoreTake(xBinarySemaphore, portMAX_DELAY);
+        // if (mpuInterrupt){
+        // mpuInterrupt = false;
+        printAngles();
+        // }
 	    //Best result is to match with DMP refresh rate
 	    // Its last value in components/MPU6050/MPU6050_6Axis_MotionApps20.h file line 310
 	    // Now its 0x13, which means DMP is refreshed with 10Hz rate
-		vTaskDelay(5/portTICK_PERIOD_MS);
+		// vTaskDelay(5/portTICK_PERIOD_MS);
 	}
 
 	vTaskDelete(NULL);
