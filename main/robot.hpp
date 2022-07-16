@@ -34,6 +34,7 @@ class Sensor: public Dynamics{
 
 class MyServo {
   public:
+  MyServo();
   void write(int pos);
 };
 

@@ -13,8 +13,9 @@
 #define PIN_SDA 21
 #define PIN_CLK 22
 
-#define GPIO_INPUT_IO_0 GPIO_NUM_33
+#define GPIO_MPU_INTERRUPT GPIO_NUM_33
 #define ESP_INTR_FLAG_DEFAULT 0
+#define GPIO_SERVO GPIO_NUM_32
 
 #include <iostream>
 #include <Eigen/Dense>
@@ -33,6 +34,31 @@ void IRAM_ATTR mpu_isr_handler(void* arg)
 {
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
     xSemaphoreGiveFromISR(xBinarySemaphoreMpuInterrupt, &xHigherPriorityTaskWoken);
+    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+}
+
+MyServo::MyServo(){
+    servo_config_t servo_cfg = {
+        .max_angle = 180,
+        .min_width_us = 500,
+        .max_width_us = 2500,
+        .freq = 50,
+        .timer_number = LEDC_TIMER_0,
+        .channels = {
+            .servo_pin = {
+                GPIO_SERVO,
+            },
+            .ch = {
+                LEDC_CHANNEL_0,
+            },
+        },
+        .channel_number = 1,
+    } ;
+    iot_servo_init(LEDC_LOW_SPEED_MODE, &servo_cfg);
+}
+
+void MyServo::write(int pos){
+    iot_servo_write_angle(LEDC_LOW_SPEED_MODE, 0, pos);
 }
 
 float Sensor::angle(){
@@ -70,6 +96,7 @@ float Sensor::angle(){
 }
 
 Sensor sensor;
+MyServo servo;
 
 void task_display(void*){
 	while(1){
@@ -82,6 +109,16 @@ void task_display(void*){
 
 void app_main(void)
 {
+    for(int posDegrees = 0; posDegrees <= 180; posDegrees++) {
+        printf("angle: %i\n", posDegrees);
+        servo.write(posDegrees);
+        // iot_servo_write_angle(LEDC_LOW_SPEED_MODE, 0, posDegrees);
+        usleep(20000);
+        //   std::this_thread::sleep_for(20);
+        // Serial.println(posDegrees);
+        // delay(20);
+    }
+
     // MatrixXd m(2,2);
     // m(0,0) = 3;
     // m(1,0) = 2.5;
@@ -109,13 +146,13 @@ void app_main(void)
 
     gpio_config_t io_conf = {};
     io_conf.intr_type = GPIO_INTR_POSEDGE;
-    io_conf.pin_bit_mask = 1ULL<<GPIO_INPUT_IO_0;
+    io_conf.pin_bit_mask = 1ULL<<GPIO_MPU_INTERRUPT;
     io_conf.mode = GPIO_MODE_INPUT;
     io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
     gpio_config(&io_conf);
-    gpio_set_intr_type(GPIO_INPUT_IO_0, GPIO_INTR_ANYEDGE);
+    gpio_set_intr_type(GPIO_MPU_INTERRUPT, GPIO_INTR_ANYEDGE);
     gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
-    gpio_isr_handler_add(GPIO_INPUT_IO_0, mpu_isr_handler, (void*) GPIO_INPUT_IO_0);
+    gpio_isr_handler_add(GPIO_MPU_INTERRUPT, mpu_isr_handler, (void*) GPIO_MPU_INTERRUPT);
     vTaskDelay(500/portTICK_PERIOD_MS);
     xTaskCreatePinnedToCore(&task_display, "disp_task", 8192, NULL, 1, NULL, 0);
     xTaskCreatePinnedToCore(&task_display, "disp_task", 8192, NULL, 1, NULL, 1);
