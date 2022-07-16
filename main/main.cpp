@@ -44,11 +44,13 @@ uint8_t fifoBuffer[64]; // FIFO storage buffer
 uint8_t mpuIntStatus;   // holds actual interrupt status byte from MPU
 
 void printAngles(){
+    printf("core is %i ", xPortGetCoreID());
     mpuIntStatus = mpu.getIntStatus();
     // get current FIFO count
     fifoCount = mpu.getFIFOCount();
 
     if ((mpuIntStatus & 0x10) || fifoCount == 1024) {
+        // printf("resetting FIFO on the core %i \n", xPortGetCoreID());
         // reset so we can continue cleanly
         mpu.resetFIFO();
 
@@ -63,10 +65,12 @@ void printAngles(){
         mpu.dmpGetQuaternion(&q, fifoBuffer);
         mpu.dmpGetGravity(&gravity, &q);
         mpu.dmpGetYawPitchRoll(ypr, &q, &gravity);
+        // printf("angles on the core %i ", xPortGetCoreID());
         printf("YAW: %3.1f, ", ypr[0] * 180/M_PI);
         printf("PITCH: %3.1f, ", ypr[1] * 180/M_PI);
         printf("ROLL: %3.1f \n", ypr[2] * 180/M_PI);
     }
+    // vTaskDelay(1000/portTICK_PERIOD_MS);
 }
 
 void task_display(void*){
@@ -131,5 +135,6 @@ void app_main(void)
     // task_initI2C(NULL);
     vTaskDelay(500/portTICK_PERIOD_MS);
     // task_display(NULL);
-    xTaskCreate(&task_display, "disp_task", 8192, NULL, 5, NULL);
+    xTaskCreatePinnedToCore(&task_display, "disp_task", 8192, NULL, 5, NULL, 0);
+    xTaskCreatePinnedToCore(&task_display, "disp_task", 8192, NULL, 5, NULL, 1);
 }
