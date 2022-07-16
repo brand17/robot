@@ -21,9 +21,9 @@
 using Eigen::MatrixXd;
 
 MPU6050 mpu = MPU6050();
-// bool mpuInterrupt = false;
-SemaphoreHandle_t xBinarySemaphore = xSemaphoreCreateBinary();
-
+SemaphoreHandle_t xBinarySemaphoreMpuInterrupt = xSemaphoreCreateBinary();
+SemaphoreHandle_t xMutexMpu = xSemaphoreCreateMutex();
+ 
 extern "C" {
 	void app_main(void);
 }
@@ -31,8 +31,7 @@ extern "C" {
 void IRAM_ATTR gpio_isr_handler(void* arg)
 {
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-    xSemaphoreGiveFromISR(xBinarySemaphore, &xHigherPriorityTaskWoken);
-    // mpuInterrupt = true;
+    xSemaphoreGiveFromISR(xBinarySemaphoreMpuInterrupt, &xHigherPriorityTaskWoken);
 }
 
 Quaternion q;           // [w, x, y, z]         quaternion container
@@ -44,22 +43,18 @@ uint8_t fifoBuffer[64]; // FIFO storage buffer
 uint8_t mpuIntStatus;   // holds actual interrupt status byte from MPU
 
 void printAngles(){
-    printf("core is %i ", xPortGetCoreID());
+    xSemaphoreTake(xMutexMpu, portMAX_DELAY);
+    // printf("core is %i ", xPortGetCoreID());
     mpuIntStatus = mpu.getIntStatus();
-    // get current FIFO count
     fifoCount = mpu.getFIFOCount();
 
     if ((mpuIntStatus & 0x10) || fifoCount == 1024) {
         // printf("resetting FIFO on the core %i \n", xPortGetCoreID());
-        // reset so we can continue cleanly
         mpu.resetFIFO();
-
-    // otherwise, check for DMP data ready interrupt frequently)
     } else if (mpuIntStatus & 0x02) {
+        printf("calc angles on the core %i ", xPortGetCoreID());
         // wait for correct available data length, should be a VERY short wait
         while (fifoCount < packetSize) fifoCount = mpu.getFIFOCount();
-
-        // read a packet from FIFO
 
         mpu.getFIFOBytes(fifoBuffer, packetSize);
         mpu.dmpGetQuaternion(&q, fifoBuffer);
@@ -71,18 +66,13 @@ void printAngles(){
         printf("ROLL: %3.1f \n", ypr[2] * 180/M_PI);
     }
     // vTaskDelay(1000/portTICK_PERIOD_MS);
+    xSemaphoreGive(xMutexMpu);
 }
 
 void task_display(void*){
 	while(1){
-        xSemaphoreTake(xBinarySemaphore, portMAX_DELAY);
-        // if (mpuInterrupt){
-        // mpuInterrupt = false;
+        xSemaphoreTake(xBinarySemaphoreMpuInterrupt, portMAX_DELAY);
         printAngles();
-        // }
-	    //Best result is to match with DMP refresh rate
-	    // Its last value in components/MPU6050/MPU6050_6Axis_MotionApps20.h file line 310
-	    // Now its 0x13, which means DMP is refreshed with 10Hz rate
 		// vTaskDelay(5/portTICK_PERIOD_MS);
 	}
 
@@ -98,7 +88,6 @@ void app_main(void)
     // m(1,1) = m(1,0) + m(0,1);
     // std::cout << m << std::endl;
 
-    // xTaskCreate(&task_initI2C, "mpu_task", 2048, NULL, 5, NULL);
 	i2c_config_t conf;
 	conf.mode = I2C_MODE_MASTER;
 	conf.sda_io_num = (gpio_num_t)PIN_SDA;
@@ -112,11 +101,6 @@ void app_main(void)
 	mpu.initialize();
 	mpu.dmpInitialize();
 
-	// This need to be setup individually
-	// mpu.setXGyroOffset(220);
-	// mpu.setYGyroOffset(76);
-	// mpu.setZGyroOffset(-85);
-	// mpu.setZAccelOffset(1788);
     mpu.CalibrateAccel(6);
     mpu.CalibrateGyro(6);
 
@@ -126,15 +110,14 @@ void app_main(void)
     io_conf.intr_type = GPIO_INTR_POSEDGE;
     io_conf.pin_bit_mask = 1ULL<<GPIO_INPUT_IO_0;
     io_conf.mode = GPIO_MODE_INPUT;
-    // io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE; // remove?
     io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
     gpio_config(&io_conf);
     gpio_set_intr_type(GPIO_INPUT_IO_0, GPIO_INTR_ANYEDGE);
     gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
     gpio_isr_handler_add(GPIO_INPUT_IO_0, gpio_isr_handler, (void*) GPIO_INPUT_IO_0);
-    // task_initI2C(NULL);
     vTaskDelay(500/portTICK_PERIOD_MS);
-    // task_display(NULL);
-    xTaskCreatePinnedToCore(&task_display, "disp_task", 8192, NULL, 5, NULL, 0);
-    xTaskCreatePinnedToCore(&task_display, "disp_task", 8192, NULL, 5, NULL, 1);
+    xTaskCreatePinnedToCore(&task_display, "disp_task", 8192, NULL, 1, NULL, 0);
+    xTaskCreatePinnedToCore(&task_display, "disp_task", 8192, NULL, 1, NULL, 1);
+    // xTaskCreate(&task_display, "disp_task", 8192, NULL, 1, NULL);
+    // xTaskCreate(&task_display, "disp_task", 8192, NULL, 1, NULL);
 }
