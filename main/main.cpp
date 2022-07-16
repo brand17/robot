@@ -8,6 +8,7 @@
 #include "MPU6050.h"
 #include "MPU6050_6Axis_MotionApps20.h"
 #include "iot_servo.h"
+#include "robot.hpp"
 
 #define PIN_SDA 21
 #define PIN_CLK 22
@@ -28,25 +29,19 @@ extern "C" {
 	void app_main(void);
 }
 
-void IRAM_ATTR gpio_isr_handler(void* arg)
+void IRAM_ATTR mpu_isr_handler(void* arg)
 {
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
     xSemaphoreGiveFromISR(xBinarySemaphoreMpuInterrupt, &xHigherPriorityTaskWoken);
 }
 
-Quaternion q;           // [w, x, y, z]         quaternion container
-VectorFloat gravity;    // [x, y, z]            gravity vector
-float ypr[3];           // [yaw, pitch, roll]   yaw/pitch/roll container and gravity vector
-uint16_t packetSize = 42;    // expected DMP packet size (default is 42 bytes)
-uint16_t fifoCount;     // count of all bytes currently in FIFO
-uint8_t fifoBuffer[64]; // FIFO storage buffer
-uint8_t mpuIntStatus;   // holds actual interrupt status byte from MPU
-
-void printAngles(){
+float Sensor::angle(){
     xSemaphoreTake(xMutexMpu, portMAX_DELAY);
     // printf("core is %i ", xPortGetCoreID());
-    mpuIntStatus = mpu.getIntStatus();
-    fifoCount = mpu.getFIFOCount();
+    uint8_t mpuIntStatus = mpu.getIntStatus();
+    uint16_t fifoCount = mpu.getFIFOCount();
+    uint8_t fifoBuffer[64]; // FIFO storage buffer
+    float angle = 1000;
 
     if ((mpuIntStatus & 0x10) || fifoCount == 1024) {
         // printf("resetting FIFO on the core %i \n", xPortGetCoreID());
@@ -54,12 +49,16 @@ void printAngles(){
     } else if (mpuIntStatus & 0x02) {
         printf("calc angles on the core %i ", xPortGetCoreID());
         // wait for correct available data length, should be a VERY short wait
-        while (fifoCount < packetSize) fifoCount = mpu.getFIFOCount();
+        while (fifoCount < PACKETSIZE) fifoCount = mpu.getFIFOCount();
 
-        mpu.getFIFOBytes(fifoBuffer, packetSize);
+        Quaternion q;
+        VectorFloat gravity;
+        float ypr[3];
+        mpu.getFIFOBytes(fifoBuffer, PACKETSIZE);
         mpu.dmpGetQuaternion(&q, fifoBuffer);
         mpu.dmpGetGravity(&gravity, &q);
         mpu.dmpGetYawPitchRoll(ypr, &q, &gravity);
+        angle = 180 * (1 - ypr[2] / M_PI) - 90;
         // printf("angles on the core %i ", xPortGetCoreID());
         printf("YAW: %3.1f, ", ypr[0] * 180/M_PI);
         printf("PITCH: %3.1f, ", ypr[1] * 180/M_PI);
@@ -67,15 +66,17 @@ void printAngles(){
     }
     // vTaskDelay(1000/portTICK_PERIOD_MS);
     xSemaphoreGive(xMutexMpu);
+    return angle;
 }
+
+Sensor sensor;
 
 void task_display(void*){
 	while(1){
-        xSemaphoreTake(xBinarySemaphoreMpuInterrupt, portMAX_DELAY);
-        printAngles();
-		// vTaskDelay(5/portTICK_PERIOD_MS);
+    xSemaphoreTake(xBinarySemaphoreMpuInterrupt, portMAX_DELAY);
+    sensor.angle();
+    // vTaskDelay(5/portTICK_PERIOD_MS);
 	}
-
 	vTaskDelete(NULL);
 }
 
@@ -114,7 +115,7 @@ void app_main(void)
     gpio_config(&io_conf);
     gpio_set_intr_type(GPIO_INPUT_IO_0, GPIO_INTR_ANYEDGE);
     gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
-    gpio_isr_handler_add(GPIO_INPUT_IO_0, gpio_isr_handler, (void*) GPIO_INPUT_IO_0);
+    gpio_isr_handler_add(GPIO_INPUT_IO_0, mpu_isr_handler, (void*) GPIO_INPUT_IO_0);
     vTaskDelay(500/portTICK_PERIOD_MS);
     xTaskCreatePinnedToCore(&task_display, "disp_task", 8192, NULL, 1, NULL, 0);
     xTaskCreatePinnedToCore(&task_display, "disp_task", 8192, NULL, 1, NULL, 1);
