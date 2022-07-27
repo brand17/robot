@@ -7,6 +7,11 @@
         "chrono": "cpp",
         "complex": "cpp",
         "adolcforward": "cpp",
-        "*.ipp": "cpp"
+        "*.ipp": "cpp",
+        "random": "cpp",
+        "limits": "cpp",
+        "valarray": "cpp",
+        "*.tcc": "cpp",
+        "regex": "cpp"
     }
 }

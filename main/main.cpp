@@ -9,6 +9,7 @@
 #include "MPU6050_6Axis_MotionApps20.h"
 #include "iot_servo.h"
 #include "robot.hpp"
+#include "esp_timer.h"
 
 #define PIN_SDA 21
 #define PIN_CLK 22
@@ -16,6 +17,7 @@
 #define GPIO_MPU_INTERRUPT GPIO_NUM_33
 #define ESP_INTR_FLAG_DEFAULT 0
 #define GPIO_SERVO GPIO_NUM_32
+#define TAG "example"
 
 #include <iostream>
 #include <Eigen/Dense>
@@ -37,7 +39,7 @@ void IRAM_ATTR mpu_isr_handler(void* arg)
     portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 
-MyServo::MyServo(){
+void Engine::initServo(){
     servo_config_t servo_cfg = {
         .max_angle = 180,
         .min_width_us = 500,
@@ -57,7 +59,7 @@ MyServo::MyServo(){
     iot_servo_init(LEDC_LOW_SPEED_MODE, &servo_cfg);
 }
 
-void MyServo::write(int pos){
+void Engine::writeServo(int pos){
     iot_servo_write_angle(LEDC_LOW_SPEED_MODE, 0, pos);
 }
 
@@ -96,7 +98,7 @@ float Sensor::angle(){
 }
 
 Sensor sensor;
-MyServo servo;
+// MyServo servo;
 
 void task_display(void*){
 	while(1){
@@ -107,17 +109,52 @@ void task_display(void*){
 	vTaskDelete(NULL);
 }
 
+Engine engine(DynamicWithTimer(0, 0, 0), sensor);
+esp_timer_handle_t oneshot_timer;
+
+static void oneshot_timer_callback(void* arg)
+{
+    // int64_t time_since_boot = esp_timer_get_time();
+    // ESP_LOGI(TAG, "One-shot timer called, time since boot: %lld us", time_since_boot);
+    // ESP_ERROR_CHECK(esp_timer_start_once(oneshot_timer, 1000000));
+    // time_since_boot = esp_timer_get_time();
+    // ESP_LOGI(TAG, "Restarted periodic timer with 1s period, time since boot: %lld us",
+    //         time_since_boot);
+    engine.moveEngine();
+}
+
+int64_t DynamicWithTimer::getTime(){
+    return esp_timer_get_time();
+}
+
+void DynamicWithTimer::setTimerPeriod(float timerPeriod){
+    ESP_LOGI(TAG, "Started setTimerPeriod: %f", timerPeriod);
+    ESP_ERROR_CHECK(esp_timer_start_once(oneshot_timer, timerPeriod * 1000000));
+}
+
+void DynamicWithTimer::initTimer(){
+    ESP_LOGI(TAG, "Started initTimer: ");
+    const esp_timer_create_args_t oneshot_timer_args = {
+            .callback = &oneshot_timer_callback,
+            .name = "one-shot"
+    };
+    ESP_ERROR_CHECK(esp_timer_create(&oneshot_timer_args, &oneshot_timer));
+}
+
 void app_main(void)
 {
-    for(int posDegrees = 0; posDegrees <= 180; posDegrees++) {
-        printf("angle: %i\n", posDegrees);
-        servo.write(posDegrees);
-        // iot_servo_write_angle(LEDC_LOW_SPEED_MODE, 0, posDegrees);
-        usleep(20000);
-        //   std::this_thread::sleep_for(20);
-        // Serial.println(posDegrees);
-        // delay(20);
-    }
+    ESP_LOGI(TAG, "Started app_main");
+    engine.initTimer();
+    engine.setAcc(1);
+    // for(int posDegrees = 0; posDegrees <= 180; posDegrees++) {
+    //     printf("angle: %i\n", posDegrees);
+    //     // engine.servo.write(posDegrees);
+    //     // iot_servo_write_angle(LEDC_LOW_SPEED_MODE, 0, posDegrees);
+    //     usleep(20000);
+    //     //   std::this_thread::sleep_for(20);
+    //     // Serial.println(posDegrees);
+    //     // delay(20);
+    // }
 
     // MatrixXd m(2,2);
     // m(0,0) = 3;
