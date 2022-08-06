@@ -38,12 +38,6 @@ public:
     };
 };
 
-// class MyServo
-// {
-// public:
-//     MyServo();
-//     void write(int pos);
-// };
 #include <float.h>
 
 class DynamicWithTimer : public Dynamics
@@ -52,61 +46,81 @@ class DynamicWithTimer : public Dynamics
     int64_t _prevTime;
 
     int64_t getTime();
-    void setTimerPeriod(float timerPeriod);
 
     float _getTimerPeriod(float dx){
+        if (acc == 0 and velocity != 0)
+        {
+            return dx / velocity;
+        }
         auto D = velocity * velocity + 2 * acc * dx;
         if (D >= 0){
             D = sqrtf(D);
-            auto tp = (-velocity + D) * _revAcc;
-            if (tp > 0) 
-                return tp;
-            return (-velocity - D) * _revAcc;
+            auto tp1 = (-velocity + D) * _revAcc;
+            auto tp2 = (-velocity - D) * _revAcc;
+            if (tp1 <= 0)
+                return tp2;
+            if (tp2 <= 0)
+                return tp1;
+            return std::fmin(tp1, tp2);
         }
         return FLT_MAX;
     }
 
+    void stopTimer();
+
 protected:
-    int _nextPos; 
-    float _nextVelocity;
+    void setTimerPeriod(float timerPeriod);
+
+    void _updatePosAndVelocity()
+    {
+        auto time_since_boot = getTime();
+        auto dt = (time_since_boot - _prevTime) / 1000000.f;
+        _prevTime = time_since_boot;
+        auto dv = acc * dt;
+        pos += dt * (velocity + dv * 0.5);
+        velocity += dv;
+        // ESP_LOGI("_updatePosAndVelocity", "pos %f velocity %f", pos, velocity);
+    }
+
+    float _getTimerPeriod()
+    {
+        float timerPeriod = FLT_MAX;
+        float dx = 0;
+        if (acc > 0 or velocity > 0)
+        { // the second option
+            dx = floorf(pos) + 1 - pos;
+            // ESP_LOGI("_getTimerPeriod", "velocity %f acc %f dx %f pos %f", velocity, acc, dx, pos);
+            timerPeriod = _getTimerPeriod(dx);
+        }
+        if (acc < 0 or velocity < 0)
+        { // the first option
+            auto dx2 = ceilf(pos) - 1 - pos;
+            // ESP_LOGI("_getTimerPeriod", "velocity %f acc %f dx2 %f pos %f", velocity, acc, dx2, pos);
+            auto tp = _getTimerPeriod(dx2);
+            if (timerPeriod > tp){
+                timerPeriod = tp;
+                dx = dx2;
+            }
+        }
+        // ESP_LOGI("_getTimerPeriod", "velocity %f acc %f dx %f pos %f", velocity, acc, dx, pos);
+        return timerPeriod;
+    }
 
 public:
     DynamicWithTimer(float p = 0, float v = 0, float a = 0) : Dynamics(p, v, a)
     {
-        _nextPos = pos + sgn(velocity);
         _revAcc = 1;
-        _prevTime = getTime();
     };
 
     void initTimer();
 
     void setAcc(float a)
     {
-        auto time_since_boot = getTime();
-        auto dt = (time_since_boot - _prevTime) / 1000000.f;
-        auto dv = acc * dt;
-        pos += dv * dt * 0.5;
-        velocity += dv;
+        _updatePosAndVelocity();
         acc = a;
         _revAcc = 1 / acc;
-        float timerPeriod = FLT_MAX;
-        float dx = 0;
-        if (acc > 0 or velocity > 0)
-        { // the second option
-            dx = floorf(pos) + 1 - pos;
-            timerPeriod = _getTimerPeriod(dx);
-        }
-        if (acc < 0 or velocity < 0)
-        { // the first option
-            auto dx2 = ceilf(pos) - 1 + pos;
-            auto tp = _getTimerPeriod(dx2);
-            if (timerPeriod < tp){
-                timerPeriod = tp;
-                dx = dx2;
-            }
-        }
-        _nextPos = pos + dx;
-        _nextVelocity = velocity + timerPeriod * acc;
+        auto timerPeriod = _getTimerPeriod();
+        stopTimer();
         setTimerPeriod(timerPeriod);
     }
 };
@@ -114,7 +128,6 @@ public:
 class Engine : public DynamicWithTimer
 {
     Sensor _sensor;
-    // MyServo _servo;
     void writeServo(int pos);
     void initServo();
 
@@ -123,24 +136,31 @@ public:
     {
         _sensor = sensor;
         initServo();
-        // _servo = servo;
     };
 
     void moveEngine()
     {
-        if (acc == 0 && velocity == 0 && std::abs(_sensor.getVelocity()) < 0.01 && std::abs(_sensor.getPos()) > 0.01)
-        {
-            // Serial << "Setting acc" << "\n";
-            acc = sgn(_sensor.getPos());
+        // printf("move Engine started... ");
+        _updatePosAndVelocity();
+        pos = roundf(pos);
+        auto timerPeriod = _getTimerPeriod();
+        setTimerPeriod(timerPeriod);
+
+        // if (acc == 0 && velocity == 0 && std::abs(_sensor.getVelocity()) < 0.01 && std::abs(_sensor.getPos()) > 0.01)
+        // {
+        //     acc = sgn(_sensor.getPos());
+        // }
+        if (abs(pos) > 90){
+            pos = constrain(pos, -90, 90);
+            velocity = 0;
+            acc = 0;
         }
-        pos = constrain(_nextPos, -90, 90);
-        // int sum;
-        // if (!__builtin_add_overflow(velocity, acc, &sum))
-        //   velocity = sum;
-        velocity = constrain(_nextVelocity, -200, 200);
+        if (abs(velocity) > 200)
+        {
+            velocity = constrain(velocity, -200, 200);
+            acc = 0;
+        }
+        // ESP_LOGI("moveEngine", "velocity %f acc %f pos %f", velocity, acc, pos);
         writeServo(pos + 90);
-        // _servo.write(_nextPos + 90);
-        // Serial.println(pos);
-        // Serial << pos << " " << velocity << " " << acc << " " << counter << "\t\n";
     }
 };

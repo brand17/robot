@@ -60,7 +60,8 @@ void Engine::initServo(){
 }
 
 void Engine::writeServo(int pos){
-    iot_servo_write_angle(LEDC_LOW_SPEED_MODE, 0, pos);
+    // ESP_LOGI("writeServo", "Servo angle: %i", pos);
+    ESP_ERROR_CHECK(iot_servo_write_angle(LEDC_LOW_SPEED_MODE, 0, pos));
 }
 
 float Sensor::angle(){
@@ -75,7 +76,7 @@ float Sensor::angle(){
         // printf("resetting FIFO on the core %i \n", xPortGetCoreID());
         mpu.resetFIFO();
     } else if (mpuIntStatus & 0x02) {
-        printf("calc angles on the core %i ", xPortGetCoreID());
+        // printf("calc angles on the core %i ", xPortGetCoreID());
         // wait for correct available data length, should be a VERY short wait
         while (fifoCount < PACKETSIZE) fifoCount = mpu.getFIFOCount();
 
@@ -102,9 +103,9 @@ Sensor sensor;
 
 void task_display(void*){
 	while(1){
-    xSemaphoreTake(xBinarySemaphoreMpuInterrupt, portMAX_DELAY);
-    sensor.angle();
-    // vTaskDelay(5/portTICK_PERIOD_MS);
+        xSemaphoreTake(xBinarySemaphoreMpuInterrupt, portMAX_DELAY);
+        sensor.angle();
+        // vTaskDelay(5/portTICK_PERIOD_MS);
 	}
 	vTaskDelete(NULL);
 }
@@ -115,11 +116,12 @@ esp_timer_handle_t oneshot_timer;
 static void oneshot_timer_callback(void* arg)
 {
     // int64_t time_since_boot = esp_timer_get_time();
-    // ESP_LOGI(TAG, "One-shot timer called, time since boot: %lld us", time_since_boot);
+    // ESP_LOGI("oneshot_timer_callback", "One-shot timer called, time since boot: %lld us", time_since_boot);
     // ESP_ERROR_CHECK(esp_timer_start_once(oneshot_timer, 1000000));
     // time_since_boot = esp_timer_get_time();
     // ESP_LOGI(TAG, "Restarted periodic timer with 1s period, time since boot: %lld us",
     //         time_since_boot);
+    // ESP_LOGI(TAG, "Starting moveEngine");
     engine.moveEngine();
 }
 
@@ -128,32 +130,52 @@ int64_t DynamicWithTimer::getTime(){
 }
 
 void DynamicWithTimer::setTimerPeriod(float timerPeriod){
-    ESP_LOGI(TAG, "Started setTimerPeriod: %f", timerPeriod);
-    ESP_ERROR_CHECK(esp_timer_start_once(oneshot_timer, timerPeriod * 1000000));
+    if (timerPeriod != FLT_MAX)
+    {
+        // ESP_LOGI("setTimerPeriod", "Started setTimerPeriod: %f", timerPeriod);
+        ESP_ERROR_CHECK(esp_timer_start_once(oneshot_timer, timerPeriod * 1000000));
+    }
+}
+
+void DynamicWithTimer::stopTimer(){
+    // ESP_LOGI(TAG, "Started stopTimer");
+    if (esp_timer_is_active(oneshot_timer))
+        // ESP_LOGI(TAG, "Stopping Timer");
+        esp_timer_stop(oneshot_timer);
 }
 
 void DynamicWithTimer::initTimer(){
-    ESP_LOGI(TAG, "Started initTimer: ");
+    // ESP_LOGI(TAG, "Started initTimer: ");
     const esp_timer_create_args_t oneshot_timer_args = {
             .callback = &oneshot_timer_callback,
             .name = "one-shot"
     };
     ESP_ERROR_CHECK(esp_timer_create(&oneshot_timer_args, &oneshot_timer));
+    _prevTime = getTime();
 }
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "Started app_main");
-    engine.initTimer();
-    engine.setAcc(1);
+    // ESP_LOGI(TAG, "Started app_main");
+
     // for(int posDegrees = 0; posDegrees <= 180; posDegrees++) {
     //     printf("angle: %i\n", posDegrees);
-    //     // engine.servo.write(posDegrees);
-    //     // iot_servo_write_angle(LEDC_LOW_SPEED_MODE, 0, posDegrees);
+    //     ESP_ERROR_CHECK(iot_servo_write_angle(LEDC_LOW_SPEED_MODE, 0, posDegrees));
     //     usleep(20000);
-    //     //   std::this_thread::sleep_for(20);
-    //     // Serial.println(posDegrees);
-    //     // delay(20);
+    // }
+
+    engine.initTimer();
+    engine.setAcc(0);
+    
+    // usleep(5000000);
+    // ESP_LOGI(TAG, "Reverse");
+    // engine.setAcc(1);
+    // usleep(10000000);
+    // esp_timer_stop(oneshot_timer);
+
+    // for (auto &a: {1, -1}){
+    //     engine.setAcc(a);
+    //     usleep(20000);
     // }
 
     // MatrixXd m(2,2);
@@ -193,6 +215,7 @@ void app_main(void)
     vTaskDelay(500/portTICK_PERIOD_MS);
     xTaskCreatePinnedToCore(&task_display, "disp_task", 8192, NULL, 1, NULL, 0);
     xTaskCreatePinnedToCore(&task_display, "disp_task", 8192, NULL, 1, NULL, 1);
+
     // xTaskCreate(&task_display, "disp_task", 8192, NULL, 1, NULL);
     // xTaskCreate(&task_display, "disp_task", 8192, NULL, 1, NULL);
 }
