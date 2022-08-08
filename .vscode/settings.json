@@ -1,5 +1,5 @@
 {
-    "idf.flashType": "UART",
+    "idf.flashType": "JTAG",
     "idf.portWin": "COM10",
     "idf.adapterTargetName": "esp32",
     "files.associations": {

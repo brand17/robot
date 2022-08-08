@@ -57,6 +57,7 @@ void Engine::initServo(){
         .channel_number = 1,
     } ;
     iot_servo_init(LEDC_LOW_SPEED_MODE, &servo_cfg);
+    writeServo(90);
 }
 
 void Engine::writeServo(int pos){
@@ -89,9 +90,9 @@ float Sensor::angle(){
         mpu.dmpGetYawPitchRoll(ypr, &q, &gravity);
         angle = 180 * (1 - ypr[2] / M_PI) - 90;
         // printf("angles on the core %i ", xPortGetCoreID());
-        printf("YAW: %3.1f, ", ypr[0] * 180/M_PI);
-        printf("PITCH: %3.1f, ", ypr[1] * 180/M_PI);
-        printf("ROLL: %3.1f \n", ypr[2] * 180/M_PI);
+        // printf("YAW: %3.1f, ", ypr[0] * 180/M_PI);
+        // printf("PITCH: %3.1f, ", ypr[1] * 180/M_PI);
+        // printf("ROLL: %3.1f \n", ypr[2] * 180/M_PI);
     }
     // vTaskDelay(1000/portTICK_PERIOD_MS);
     xSemaphoreGive(xMutexMpu);
@@ -99,18 +100,23 @@ float Sensor::angle(){
 }
 
 Sensor sensor;
-// MyServo servo;
+Engine engine(DynamicWithTimer(0, 0, 0), sensor);
+Solver solver(sensor, engine);
 
 void task_display(void*){
 	while(1){
         xSemaphoreTake(xBinarySemaphoreMpuInterrupt, portMAX_DELAY);
-        sensor.angle();
-        // vTaskDelay(5/portTICK_PERIOD_MS);
-	}
+        // sensor.update();
+        // Matrix<MAT_SIZE> obs = {sensor.getPos(), sensor.getVelocity(), sensor.getAcc(),
+        //                         engine.getPos(), engine.getVelocity(), engine.getAcc()};
+        solver.changeEngineAcc();
+        // if (!isnan(acc))
+        //     engine.setAcc(acc);
+        // auto angle = sensor.angle();
+    }
 	vTaskDelete(NULL);
 }
 
-Engine engine(DynamicWithTimer(0, 0, 0), sensor);
 esp_timer_handle_t oneshot_timer;
 
 static void oneshot_timer_callback(void* arg)
@@ -125,7 +131,7 @@ static void oneshot_timer_callback(void* arg)
     engine.moveEngine();
 }
 
-int64_t DynamicWithTimer::getTime(){
+int64_t Dynamics::getTime(){
     return esp_timer_get_time();
 }
 
@@ -157,6 +163,13 @@ void DynamicWithTimer::initTimer(){
 void app_main(void)
 {
     // ESP_LOGI(TAG, "Started app_main");
+    // while (true)
+    // {
+    //     ESP_ERROR_CHECK(iot_servo_write_angle(LEDC_LOW_SPEED_MODE, 0, 0)); usleep(5000000);
+    //     ESP_ERROR_CHECK(iot_servo_write_angle(LEDC_LOW_SPEED_MODE, 0, 90)); usleep(5000000);
+    //     ESP_ERROR_CHECK(iot_servo_write_angle(LEDC_LOW_SPEED_MODE, 0, 180)); usleep(5000000);
+    //     ESP_ERROR_CHECK(iot_servo_write_angle(LEDC_LOW_SPEED_MODE, 0, 90)); usleep(5000000);
+    // }
 
     // for(int posDegrees = 0; posDegrees <= 180; posDegrees++) {
     //     printf("angle: %i\n", posDegrees);
@@ -214,7 +227,7 @@ void app_main(void)
     gpio_isr_handler_add(GPIO_MPU_INTERRUPT, mpu_isr_handler, (void*) GPIO_MPU_INTERRUPT);
     vTaskDelay(500/portTICK_PERIOD_MS);
     xTaskCreatePinnedToCore(&task_display, "disp_task", 8192, NULL, 1, NULL, 0);
-    xTaskCreatePinnedToCore(&task_display, "disp_task", 8192, NULL, 1, NULL, 1);
+    // xTaskCreatePinnedToCore(&task_display, "disp_task", 8192, NULL, 1, NULL, 1);
 
     // xTaskCreate(&task_display, "disp_task", 8192, NULL, 1, NULL);
     // xTaskCreate(&task_display, "disp_task", 8192, NULL, 1, NULL);
