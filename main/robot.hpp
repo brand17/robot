@@ -121,7 +121,7 @@ protected:
 public:
     DynamicWithTimer(float p = 0, float v = 0, float a = 0) : Dynamics(p, v, a)
     {
-        _revAcc = 1;
+        _revAcc = 1 / a;
     };
 
     void initTimer();
@@ -139,16 +139,14 @@ public:
 
 class Engine : public DynamicWithTimer
 {
-    Sensor _sensor;
     void writeServo(int pos);
     void initServo();
 
 public:
     Engine(){}
 
-    Engine(DynamicWithTimer initial, Sensor &sensor) : DynamicWithTimer(initial.pos, initial.velocity, initial.acc)
+    Engine(DynamicWithTimer initial) : DynamicWithTimer(initial.pos, initial.velocity, initial.acc)
     {
-        _sensor = sensor;
         initServo();
     };
 
@@ -176,155 +174,218 @@ public:
     }
 };
 
-#include <BasicLinearAlgebra.h>
-using namespace BLA;
+#include <Eigen/Dense>
+using Eigen::seq;
+template <int Size>
+using Vector = Eigen::Vector<float, Size>;
+template <int rowSize, int colSize>
+using Matrix = Eigen::Matrix<float, rowSize, colSize>;
+#include <vector>
+#include <iostream>
+
 #define ZERO_LIMIT 1e-4
 #define MAT_SIZE 6
 
-bool isZero(Matrix<MAT_SIZE> col){
-  for (int i = 0; i < MAT_SIZE; i++){
-    if (col(i) != 0) return false;
-  }
-  return true;
+bool isZero(Vector<MAT_SIZE> col){
+    return (col.array() == 0).all();
 }
 
 class Solver
 {
     Sensor _sensor;
     Engine _engine;
-public:
-    Solver(Sensor &s, Engine &e) 
+    Eigen::PartialPivLU<Matrix<MAT_SIZE, MAT_SIZE>> _partialSolver;
+
+    Matrix<MAT_SIZE, MAT_SIZE> _observations = Matrix<MAT_SIZE, MAT_SIZE>::Zero();
+    int _height = 0;
+
+    std::vector<int> _getBasisIndices()
     {
-        _sensor = s;
-        _engine = e;
-        observations.Fill(0);
+        Eigen::Matrix<float, Eigen::Dynamic, MAT_SIZE, Eigen::RowMajor, MAT_SIZE, MAT_SIZE> m;  
+        m = _observations.bottomRows(_height);
+        std::vector<int> res;
+        auto i = 0;
+        for (int col = 0; col < MAT_SIZE; col++)
+        {
+            if (abs(m(i, col)) < ZERO_LIMIT)
+            {
+                for (int j = i + 1; j < _height; j++)
+                {
+                    if (abs(m(j, col)) > ZERO_LIMIT)
+                    {
+                        auto r = m.row(i).eval();
+                        m.row(i) = m.row(j);
+                        m.row(j) = r;
+                        break;
+                    }
+                }
+            }
+            if (abs(m(i, col)) >= ZERO_LIMIT)
+            {
+                res.push_back(col);
+                if (res.size() == _height)
+                    return res;
+                m.row(i) *= 1 / m(i, col);
+                for (int j = i + 1; j < _height; j++)
+                    m.row(j) -= m.row(i) * m(j, col);
+                i++;
+            }
+        }
+        return res;
+    }
+
+    int _replacedIndex(Vector<MAT_SIZE> &obs)
+    {
+        Eigen::Matrix<float, MAT_SIZE, MAT_SIZE + 1, Eigen::RowMajor> rowReduce;
+        // Matrix<MAT_SIZE, MAT_SIZE + 1> rowReduce; 
+        rowReduce << _observations.transpose(), obs;
+        auto subMatSize = std::min(MAT_SIZE, _height + 1);
+        for (int i = 0; i < subMatSize; i++)
+        {
+            auto col = MAT_SIZE - i;
+            if (abs(rowReduce(i, col)) < ZERO_LIMIT)
+            {
+                for (int j = i + 1; j < MAT_SIZE; j++)
+                {
+                    if (abs(rowReduce(j, col)) > ZERO_LIMIT)
+                    {
+                        auto r = rowReduce.row(i).eval();
+                        rowReduce.row(i) = rowReduce.row(j);
+                        rowReduce.row(j) = r;
+                        break;
+                    }
+                }
+                if (abs(rowReduce(i, col)) < ZERO_LIMIT)
+                    return col;
+            }
+            rowReduce.row(i) *= 1 / rowReduce(i, col);
+            for (int j = i + 1; j < MAT_SIZE; j++)
+                rowReduce.row(j) -= rowReduce.row(i) * rowReduce(j, col);
+        }
+        return MAT_SIZE - subMatSize;
+    }
+
+    Vector<MAT_SIZE> _nextObservations(const Vector<MAT_SIZE> &obs, const int index)
+    {
+        Vector<MAT_SIZE> next_values;
+        int l = _height - 1;
+        next_values.segment(MAT_SIZE - _height, l) = _observations.col(index).tail(l);
+        next_values(MAT_SIZE - 1) = obs(index);
+        return next_values;
+    }
+
+public:
+    Solver()
+    {
+        _sensor = Sensor();
+        _engine = Engine(DynamicWithTimer(0, 0, 1));
+    }
+
+    void initEngineTimer()
+    {
+        _engine.initTimer();
+    }
+
+    void setEngineAcc(float a)
+    {
+        _engine.setAcc(a);
+    }
+
+    void moveEngine()
+    {
+        _engine.moveEngine();
     }
 
     void changeEngineAcc()
     {
         if (_sensor.update() == 1000) 
             return;
-        Matrix<MAT_SIZE> obs = {_sensor.getPos(), _sensor.getVelocity(), _sensor.getAcc(),
-                                _engine.getPos(), _engine.getVelocity(), _engine.getAcc()};
+        Vector<MAT_SIZE> obs = {_engine.getAcc(), _sensor.getAcc(), _sensor.getVelocity(), 
+                                _sensor.getPos(), _engine.getVelocity(), _engine.getPos()};
         if (isZero(obs))
             return;
         float newAcc = NAN;
         int ri;
-        // observations = Identity<6, 6>();
-        if (height == MAT_SIZE)
+        if (_height == MAT_SIZE)
         {
-            auto A = observations;
-            auto decomp = LUDecompose(A);
-            // Serial << "observations " << observations << "\n";
-            Serial << "obs " << obs << "\n";
-            if (decomp.singular)
-            {
-                Serial << "singular " << observations << "\n";
-            }
+            _partialSolver.compute(_observations);
+            Matrix<MAT_SIZE, 3> ratios;
             for (int i = 0; i < 3; i++)
             {
-                auto sensData = nextObservations(obs, i);
-                ratios.Submatrix<MAT_SIZE, 1>(0, i) = LUSolve(decomp, sensData);
+                auto sensData = _nextObservations(obs, i + 1);
+                ratios.col(i) = _partialSolver.solve(sensData);
             }
-            Matrix<3, 1> b = (~ratios).Submatrix<3, MAT_SIZE - 1>(0, 0) * obs.Submatrix<MAT_SIZE - 1, 1>(0, 0);
-            auto a = (~ratios).Submatrix<3, 1>(MAT_SIZE - 1, 0);
-            newAcc = (~b * a)(0, 0) / (~a * a)(0, 0);
-            Serial << newAcc << "\n";
-            Serial << "observations before: " << observations << endl;
-            ri = replacedIndexWithDet(obs);
-            // Serial << "observations after: " << observations << endl;
+            int l = MAT_SIZE - 1;
+            Vector<3> b; b.noalias() = ratios.transpose().rightCols(l) * obs.tail(l);
+            Vector<3> a = ratios.row(0);
+            newAcc = - b.dot(a) / a.dot(a);
+            std::cout << obs(3) << "\n";
+            // ri = _replacedIndex(obs);
         }
         else
         {
-            ri = replacedIndexGauss(obs);
-            Serial << "height=" << height << "\n";
-            Serial << "observations: " << observations << endl;
+            if (_height > 1)
+            {
+                auto ind = _getBasisIndices(); // basis indices
+                auto obsBasis = _observations.bottomRows(_height)(Eigen::all, ind);
+                // auto m = Matrix<2, 2>({{1, 2, 3}, {3, 4}});
+                // auto obsBasis = m(Eigen::all, std::vector<int>({0, 1}));
+                auto dynSolver = obsBasis.partialPivLu();
+                // if (_fullSolver.rank() < 2)
+                //     return;
+                Eigen::Matrix<float, Eigen::Dynamic, 3, 0, MAT_SIZE> ratios(_height, 3);
+                for (int i = 0; i < 3; i++)
+                {
+                    auto sensData = _nextObservations(obs, i + 1).bottomRows(_height);
+                    // Vector<3> s {1, 1, 1};
+                    // auto sensData = s.bottomRows(_height);
+                    ratios.col(i) = dynSolver.solve(sensData);
+                }
+                int l = _height - 1;
+                Vector<3> b; b.noalias() = ratios.transpose().rightCols(l) * obs(ind).tail(l);
+                Vector<3> a = ratios.row(0);
+                newAcc = - b.dot(a) / a.dot(a);
+                // ri = _replacedIndex(obs);
+            }
+            // else
+            //     ri = _replacedIndex(obs);
         }
+        ri = _replacedIndex(obs);
         for (int i = ri; i < MAT_SIZE - 1; i++)
         {
-            observations.Submatrix<1, MAT_SIZE>(i, 0) =
-                Matrix<1, MAT_SIZE>(observations.Submatrix<1, MAT_SIZE>(i + 1, 0));
+            _observations.row(i) = _observations.row(i + 1);
         }
-        observations.Submatrix<1, MAT_SIZE>(MAT_SIZE - 1, 0) = ~obs;
-        if (height < MAT_SIZE && ri < MAT_SIZE - height)
-            height++;
-        // Serial << observations << "\n"; delay(1000);
+        _observations.row(MAT_SIZE - 1) = obs.transpose();
+        if (_height < MAT_SIZE && ri < MAT_SIZE - _height)
+            _height++;
         if (!isnan(newAcc))
         {
-            _engine.setAcc(newAcc);
-        }
-        else{
-            if (_engine.getAcc() == 0 && _engine.getVelocity() == 0 && std::abs(_sensor.getVelocity()) < 0.01 && std::abs(_sensor.getPos()) > 0.01)
-            {
-                // printf("acc changed\n");
-                _engine.acc = sgn(_sensor.getPos());
-            }
+            _engine.setAcc(newAcc); // printf("height=%i acc=%f\n", _height, newAcc);
         }
     }
 
-private:
-    int replacedIndexWithDet(Matrix<MAT_SIZE> &obs)
+    void test()
     {
-        for (int i = 0; i < MAT_SIZE; i++)
-        {
-            Matrix<MAT_SIZE, MAT_SIZE> rowReplaced = observations;
-            rowReplaced.Submatrix<1, MAT_SIZE>(i, 0) = ~obs;
-            // float det = Determinant(rowReplaced);
-            // if (abs(det) > ZERO_LIMIT)
-            //   return i;
-            // auto m1 = rowReplaced;
-            auto m = LUDecompose(rowReplaced);
-            if (!m.singular)
-            {
-                // Serial << "non-singular " << m1 << "\n";
-                return i;
-            }
-        }
-        return 0;
-    }
+        _height = 2;
+        _observations(5, 5) = 2;
+        auto res = _getBasisIndices();
+        assert(res.size() == 1 && res[0] == 5);
 
-    int replacedIndexGauss(Matrix<MAT_SIZE> &obs)
-    {
-        Matrix<MAT_SIZE, MAT_SIZE + 1> rowReduce = ~observations || obs;
-        // Serial << rowReduce << "\n"; delay(1000);
-        for (int i = 0; i < MAT_SIZE; i++)
-        {
-            if (abs(rowReduce(i, MAT_SIZE - i)) < ZERO_LIMIT)
-            {
-                bool allZeros = true;
-                for (int j = i + 1; j < MAT_SIZE; j++)
-                {
-                    if (abs(rowReduce(j, MAT_SIZE - i)) > ZERO_LIMIT)
-                    {
-                        auto r = Matrix<1, MAT_SIZE + 1>(rowReduce.Submatrix<1, MAT_SIZE + 1>(i, 0));
-                        rowReduce.Submatrix<1, MAT_SIZE + 1>(i, 0) = Matrix<1, MAT_SIZE + 1>(rowReduce.Submatrix<1, MAT_SIZE + 1>(j, 0));
-                        rowReduce.Submatrix<1, MAT_SIZE + 1>(j, 0) = r;
-                        allZeros = false;
-                        break;
-                    }
-                }
-                if (allZeros)
-                    return MAT_SIZE - i;
-            }
-            rowReduce.Submatrix<1, MAT_SIZE + 1>(i, 0) *= 1 / rowReduce(i, MAT_SIZE - i);
-            for (int j = i + 1; j < MAT_SIZE; j++)
-                rowReduce.Submatrix<1, MAT_SIZE + 1>(j, 0) -= rowReduce.Submatrix<1, MAT_SIZE + 1>(i, 0) * rowReduce(j, MAT_SIZE - i);
-        }
-        return 0;
-    }
+        _observations(4, 5) = 2;
+        res = _getBasisIndices();
+        assert(res.size() == 1 && res[0] == 5);
 
-    Matrix<MAT_SIZE, MAT_SIZE> observations;
-    Matrix<MAT_SIZE, 3> ratios;
-    int height = 0;
+        _observations(5, 4) = 2;
+        res = _getBasisIndices();
+        assert(res.size() == 2 && res == std::vector<int>({4, 5}));
 
-    Matrix<MAT_SIZE> nextObservations(const Matrix<MAT_SIZE> &obs, const int index)
-    {
-        auto next_values = Matrix<MAT_SIZE>(observations.Column(index));
-        for (int i = 0; i < MAT_SIZE - 1; i++)
-        {
-            next_values(i) = next_values(i + 1);
-        }
-        next_values(MAT_SIZE - 1) = obs(index);
-        return next_values;
+        _observations(5, 3) = 2;
+        res = _getBasisIndices();
+        assert(res.size() == 2 && res == std::vector<int>({3, 5}));
+
+        _observations(4, 4) = 2;
+        res = _getBasisIndices();
+        assert(res.size() == 2 && res == std::vector<int>({3, 4}));
+        ESP_LOGI("tests", "done!!!");
     }
 };

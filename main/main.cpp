@@ -20,9 +20,6 @@
 #define TAG "example"
 
 #include <iostream>
-#include <Eigen/Dense>
- 
-using Eigen::MatrixXd;
 
 MPU6050 mpu = MPU6050();
 SemaphoreHandle_t xBinarySemaphoreMpuInterrupt = xSemaphoreCreateBinary();
@@ -88,7 +85,8 @@ float Sensor::angle(){
         mpu.dmpGetQuaternion(&q, fifoBuffer);
         mpu.dmpGetGravity(&gravity, &q);
         mpu.dmpGetYawPitchRoll(ypr, &q, &gravity);
-        angle = 180 * (1 - ypr[2] / M_PI) - 90;
+        angle = 180 * (1 - ypr[2] / M_PI) - 180;
+        // printf("angle: %f\n", angle);
         // printf("angles on the core %i ", xPortGetCoreID());
         // printf("YAW: %3.1f, ", ypr[0] * 180/M_PI);
         // printf("PITCH: %3.1f, ", ypr[1] * 180/M_PI);
@@ -99,20 +97,14 @@ float Sensor::angle(){
     return angle;
 }
 
-Sensor sensor;
-Engine engine(DynamicWithTimer(0, 0, 0), sensor);
-Solver solver(sensor, engine);
+Solver solver;
 
 void task_display(void*){
 	while(1){
         xSemaphoreTake(xBinarySemaphoreMpuInterrupt, portMAX_DELAY);
-        // sensor.update();
-        // Matrix<MAT_SIZE> obs = {sensor.getPos(), sensor.getVelocity(), sensor.getAcc(),
-        //                         engine.getPos(), engine.getVelocity(), engine.getAcc()};
+        // int64_t time_since_boot = esp_timer_get_time();
+        // ESP_LOGI("Sensor changed", "One-shot timer called, time since boot: %lld us", time_since_boot);
         solver.changeEngineAcc();
-        // if (!isnan(acc))
-        //     engine.setAcc(acc);
-        // auto angle = sensor.angle();
     }
 	vTaskDelete(NULL);
 }
@@ -128,7 +120,7 @@ static void oneshot_timer_callback(void* arg)
     // ESP_LOGI(TAG, "Restarted periodic timer with 1s period, time since boot: %lld us",
     //         time_since_boot);
     // ESP_LOGI(TAG, "Starting moveEngine");
-    engine.moveEngine();
+    solver.moveEngine();
 }
 
 int64_t Dynamics::getTime(){
@@ -177,12 +169,13 @@ void app_main(void)
     //     usleep(20000);
     // }
 
-    engine.initTimer();
-    engine.setAcc(0);
+    // engine.initTimer();
+    // engine.setAcc(1);
+    solver.initEngineTimer();
     
     // usleep(5000000);
     // ESP_LOGI(TAG, "Reverse");
-    // engine.setAcc(1);
+    // solver.setEngineAcc(-1);
     // usleep(10000000);
     // esp_timer_stop(oneshot_timer);
 
@@ -226,6 +219,7 @@ void app_main(void)
     gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
     gpio_isr_handler_add(GPIO_MPU_INTERRUPT, mpu_isr_handler, (void*) GPIO_MPU_INTERRUPT);
     vTaskDelay(500/portTICK_PERIOD_MS);
+    // solver.test();
     xTaskCreatePinnedToCore(&task_display, "disp_task", 8192, NULL, 1, NULL, 0);
     // xTaskCreatePinnedToCore(&task_display, "disp_task", 8192, NULL, 1, NULL, 1);
 
