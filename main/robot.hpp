@@ -1,3 +1,4 @@
+#include <iostream>
 #ifndef ARDUINO
 #define constrain(amt, low, high) ((amt) < (low) ? (low) : ((amt) > (high) ? (high) : (amt)))
 #endif
@@ -159,7 +160,7 @@ public:
         auto timerPeriod = _getTimerPeriod();
         setTimerPeriod(timerPeriod);
 
-        if (abs(pos) > 90){
+        if (abs(pos) > 90){ // to do: move to _updatePosAndVelocity to improve acc calculation
             pos = constrain(pos, -90, 90);
             velocity = 0;
             acc = 0;
@@ -169,7 +170,7 @@ public:
             velocity = constrain(velocity, -400, 400);
             acc = 0;
         }
-        // ESP_LOGI("moveEngine", "velocity %f acc %f pos %f", velocity, acc, pos);
+        // std::cout << velocity << " " << acc << " " << pos << "\n";
         writeServo(pos + 90);
     }
 };
@@ -181,7 +182,6 @@ using Vector = Eigen::Vector<float, Size>;
 template <int rowSize, int colSize>
 using Matrix = Eigen::Matrix<float, rowSize, colSize>;
 #include <vector>
-#include <iostream>
 
 #define ZERO_LIMIT 1e-4
 #define MAT_SIZE 6
@@ -296,6 +296,8 @@ public:
         _engine.moveEngine();
     }
 
+    // int counter = 0;
+
     void changeEngineAcc()
     {
         if (_sensor.update() == 1000) 
@@ -319,8 +321,14 @@ public:
             Vector<3> b; b.noalias() = ratios.transpose().rightCols(l) * obs.tail(l);
             Vector<3> a = ratios.row(0);
             newAcc = - b.dot(a) / a.dot(a);
-            std::cout << obs(3) << "\n";
-            // ri = _replacedIndex(obs);
+            std::cout << obs.transpose() << " " << newAcc << "\n";
+            // counter ++;
+            // // std::cout << counter << "\n";
+            // if (counter == 100){
+            //     std::cout << _observations << "\n"
+            //               << obs.transpose() << "\n"
+            //               << newAcc << "\n";
+            // }
         }
         else
         {
