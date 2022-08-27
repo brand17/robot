@@ -1,27 +1,20 @@
 #include "freertos/FreeRTOS.h"
 #include "sdkconfig.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
 
-#include <driver/i2c.h>
 #include <esp_log.h>
 #include <esp_err.h>
-#include "MPU6050.h"
-#include "MPU6050_6Axis_MotionApps20.h"
 #include "iot_servo.h"
 #include "robot.hpp"
 #include "esp_timer.h"
 
-#define PIN_SDA 21
-#define PIN_CLK 22
-
-#define GPIO_MPU_INTERRUPT GPIO_NUM_33
-#define ESP_INTR_FLAG_DEFAULT 0
+#define GPIO_TILT GPIO_NUM_36
 #define GPIO_SERVO GPIO_NUM_32
 #define TAG "example"
 
 #include <iostream>
 
-MPU6050 mpu = MPU6050();
 SemaphoreHandle_t xBinarySemaphoreMpuInterrupt = xSemaphoreCreateBinary();
 SemaphoreHandle_t xMutexMpu = xSemaphoreCreateMutex();
  
@@ -29,14 +22,8 @@ extern "C" {
 	void app_main(void);
 }
 
-void IRAM_ATTR mpu_isr_handler(void* arg)
-{
-    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-    xSemaphoreGiveFromISR(xBinarySemaphoreMpuInterrupt, &xHigherPriorityTaskWoken);
-    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
-}
-
 void Engine::initServo(){
+    // ESP_LOGI("initServo", "started");
     servo_config_t servo_cfg = {
         .max_angle = 180,
         .min_width_us = 500,
@@ -53,7 +40,7 @@ void Engine::initServo(){
         },
         .channel_number = 1,
     } ;
-    iot_servo_init(LEDC_LOW_SPEED_MODE, &servo_cfg);
+    ESP_ERROR_CHECK(iot_servo_init(LEDC_LOW_SPEED_MODE, &servo_cfg));
     writeServo(90);
 }
 
@@ -62,39 +49,20 @@ void Engine::writeServo(int pos){
     ESP_ERROR_CHECK(iot_servo_write_angle(LEDC_LOW_SPEED_MODE, 0, pos));
 }
 
+#include "driver/adc.h"
+#include "esp_adc_cal.h"
+static esp_adc_cal_characteristics_t adc1_chars;
+
 float Sensor::angle(){
     xSemaphoreTake(xMutexMpu, portMAX_DELAY);
     // printf("core is %i ", xPortGetCoreID());
-    uint8_t mpuIntStatus = mpu.getIntStatus();
-    uint16_t fifoCount = mpu.getFIFOCount();
-    uint8_t fifoBuffer[64]; // FIFO storage buffer
-    float angle = 1000;
 
-    if ((mpuIntStatus & 0x10) || fifoCount == 1024) {
-        // printf("resetting FIFO on the core %i \n", xPortGetCoreID());
-        mpu.resetFIFO();
-    } else if (mpuIntStatus & 0x02) {
-        // printf("calc angles on the core %i ", xPortGetCoreID());
-        // wait for correct available data length, should be a VERY short wait
-        while (fifoCount < PACKETSIZE) fifoCount = mpu.getFIFOCount();
+    auto voltage = esp_adc_cal_raw_to_voltage(adc1_get_raw(ADC1_CHANNEL_0), &adc1_chars);
+    ESP_LOGI(TAG, "ADC1_CHANNEL_0: %d mV", voltage);
 
-        Quaternion q;
-        VectorFloat gravity;
-        float ypr[3];
-        mpu.getFIFOBytes(fifoBuffer, PACKETSIZE);
-        mpu.dmpGetQuaternion(&q, fifoBuffer);
-        mpu.dmpGetGravity(&gravity, &q);
-        mpu.dmpGetYawPitchRoll(ypr, &q, &gravity);
-        angle = 180 * (1 - ypr[2] / M_PI) - 180;
-        // printf("angle: %f\n", angle);
-        // printf("angles on the core %i ", xPortGetCoreID());
-        // printf("YAW: %3.1f, ", ypr[0] * 180/M_PI);
-        // printf("PITCH: %3.1f, ", ypr[1] * 180/M_PI);
-        // printf("ROLL: %3.1f \n", ypr[2] * 180/M_PI);
-    }
     // vTaskDelay(1000/portTICK_PERIOD_MS);
     xSemaphoreGive(xMutexMpu);
-    return angle;
+    return (float)voltage;
 }
 
 Solver solver;
@@ -115,10 +83,6 @@ static void oneshot_timer_callback(void* arg)
 {
     // int64_t time_since_boot = esp_timer_get_time();
     // ESP_LOGI("oneshot_timer_callback", "One-shot timer called, time since boot: %lld us", time_since_boot);
-    // ESP_ERROR_CHECK(esp_timer_start_once(oneshot_timer, 1000000));
-    // time_since_boot = esp_timer_get_time();
-    // ESP_LOGI(TAG, "Restarted periodic timer with 1s period, time since boot: %lld us",
-    //         time_since_boot);
     // ESP_LOGI(TAG, "Starting moveEngine");
     solver.moveEngine();
 }
@@ -152,8 +116,32 @@ void DynamicWithTimer::initTimer(){
     _prevTime = getTime();
 }
 
+static void periodic_timer_callback(void *arg)
+{
+    // int64_t time_since_boot = esp_timer_get_time();
+    // ESP_LOGI(TAG, "Periodic timer called, time since boot: %lld us", time_since_boot);
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    xSemaphoreGiveFromISR(xBinarySemaphoreMpuInterrupt, &xHigherPriorityTaskWoken);
+    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+}
+
 void app_main(void)
 {
+    auto adc_width = (adc_bits_width_t)ADC_WIDTH_BIT_DEFAULT;
+    esp_adc_cal_characterize(ADC_UNIT_1, ADC_ATTEN_DB_11, adc_width, 0, &adc1_chars);
+    ESP_ERROR_CHECK(adc1_config_width(adc_width));
+    ESP_ERROR_CHECK(adc1_config_channel_atten(ADC1_CHANNEL_0, ADC_ATTEN_DB_11));
+
+    const esp_timer_create_args_t periodic_timer_args = {
+            .callback = &periodic_timer_callback,
+            .name = "periodic"
+    };
+
+    esp_timer_handle_t periodic_timer;
+    ESP_ERROR_CHECK(esp_timer_create(&periodic_timer_args, &periodic_timer));
+
+    ESP_ERROR_CHECK(esp_timer_start_periodic(periodic_timer, 10000));
+
     // ESP_LOGI(TAG, "Started app_main");
     // while (true)
     // {
@@ -184,41 +172,6 @@ void app_main(void)
     //     usleep(20000);
     // }
 
-    // MatrixXd m(2,2);
-    // m(0,0) = 3;
-    // m(1,0) = 2.5;
-    // m(0,1) = -1;
-    // m(1,1) = m(1,0) + m(0,1);
-    // std::cout << m << std::endl;
-
-	i2c_config_t conf;
-	conf.mode = I2C_MODE_MASTER;
-	conf.sda_io_num = (gpio_num_t)PIN_SDA;
-	conf.scl_io_num = (gpio_num_t)PIN_CLK;
-	conf.sda_pullup_en = GPIO_PULLUP_ENABLE;
-	conf.scl_pullup_en = GPIO_PULLUP_ENABLE;
-	conf.master.clk_speed = 400000;
-    conf.clk_flags = 0;
-	ESP_ERROR_CHECK(i2c_param_config(I2C_NUM_0, &conf));
-	ESP_ERROR_CHECK(i2c_driver_install(I2C_NUM_0, I2C_MODE_MASTER, 0, 0, 0));
-	mpu.initialize();
-	mpu.dmpInitialize();
-
-    mpu.CalibrateAccel(6);
-    mpu.CalibrateGyro(6);
-
-	mpu.setDMPEnabled(true);
-
-    gpio_config_t io_conf = {};
-    io_conf.intr_type = GPIO_INTR_POSEDGE;
-    io_conf.pin_bit_mask = 1ULL<<GPIO_MPU_INTERRUPT;
-    io_conf.mode = GPIO_MODE_INPUT;
-    io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
-    gpio_config(&io_conf);
-    gpio_set_intr_type(GPIO_MPU_INTERRUPT, GPIO_INTR_ANYEDGE);
-    gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
-    gpio_isr_handler_add(GPIO_MPU_INTERRUPT, mpu_isr_handler, (void*) GPIO_MPU_INTERRUPT);
-    vTaskDelay(500/portTICK_PERIOD_MS);
     // solver.test();
     xTaskCreatePinnedToCore(&task_display, "disp_task", 8192, NULL, 1, NULL, 0);
     // xTaskCreatePinnedToCore(&task_display, "disp_task", 8192, NULL, 1, NULL, 1);
