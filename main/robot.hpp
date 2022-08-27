@@ -1,4 +1,5 @@
 #include <iostream>
+#include <math.h>
 #ifndef ARDUINO
 #define constrain(amt, low, high) ((amt) < (low) ? (low) : ((amt) > (high) ? (high) : (amt)))
 #endif
@@ -277,6 +278,7 @@ class Solver
 public:
     Solver()
     {
+        // printf("Solver constructor called\n");
         _sensor = Sensor();
         _engine = Engine(DynamicWithTimer(0, 0, 1));
     }
