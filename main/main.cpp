@@ -56,9 +56,9 @@ static esp_adc_cal_characteristics_t adc1_chars;
 float Sensor::angle(){
     xSemaphoreTake(xMutexMpu, portMAX_DELAY);
     // printf("core is %i ", xPortGetCoreID());
-
-    auto voltage = esp_adc_cal_raw_to_voltage(adc1_get_raw(ADC1_CHANNEL_0), &adc1_chars);
-    ESP_LOGI(TAG, "ADC1_CHANNEL_0: %d mV", voltage);
+    auto r = adc1_get_raw(ADC1_CHANNEL_0);
+    auto voltage = esp_adc_cal_raw_to_voltage(r, &adc1_chars);
+    ESP_LOGI(TAG, "ADC1_CHANNEL_0: %d mV, raw: %i", voltage, r);
 
     // vTaskDelay(1000/portTICK_PERIOD_MS);
     xSemaphoreGive(xMutexMpu);
