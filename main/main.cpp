@@ -62,7 +62,7 @@ float Sensor::angle(){
 
     // vTaskDelay(1000/portTICK_PERIOD_MS);
     xSemaphoreGive(xMutexMpu);
-    return (float)voltage;
+    return (float)voltage - 1300.f;
 }
 
 Solver solver;
