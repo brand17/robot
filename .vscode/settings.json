@@ -70,7 +70,9 @@
         "stdexcept": "cpp",
         "streambuf": "cpp",
         "thread": "cpp",
-        "typeinfo": "cpp"
+        "typeinfo": "cpp",
+        "*.inc": "cpp",
+        "openglsupport": "cpp"
     },
     "idf.openOcdConfigs": [
         "interface/ftdi/esp32_devkitj_v1.cfg",

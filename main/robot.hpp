@@ -1,8 +1,10 @@
 #include <iostream>
+#include <math.h>
+#include <array>
 #ifndef ARDUINO
 #define constrain(amt, low, high) ((amt) < (low) ? (low) : ((amt) > (high) ? (high) : (amt)))
 #endif
-#define PACKETSIZE 42 // expected DMP packet size (default is 42 bytes)
+#define SENSOR_OUTPUT_DIM 3
 
 template <typename T>
 int sgn(T val)
@@ -10,48 +12,51 @@ int sgn(T val)
     return (T(0) < val) - (val < T(0));
 }
 
+extern int64_t getTime();
+
 class Dynamics
 {
-public: // protected:
-    volatile float pos = 0, velocity = 0, acc = 0;
-
-protected:
-    int64_t _prevTime = 0;
-    int64_t getTime();
-
 public:
-    float getPos() { return pos; }
-    float getVelocity() { return velocity; }
-    float getAcc() { return acc; }
+    float pos = 0, velocity = 0, acc = 0;
+    // float getPos() { return _pos; }
+    // float getVelocity() { return _velocity; }
+    // float getAcc() { return _acc; }
     Dynamics(float p = 0, float v = 0, float a = 0) : pos(p), velocity(v), acc(a){};
 };
 
-class Sensor : public Dynamics
+class Sensor
 {
+    int64_t _prevTime = 0;
 public:
-    float angle();
+    Dynamics observations[SENSOR_OUTPUT_DIM];
+    std::array<float, SENSOR_OUTPUT_DIM> angles();
     float update()
     {
-        auto newPos = angle();
-        if (newPos != 1000)
+        auto angs = angles();
+        auto t = getTime();
+        float pos = 1000000;
+        if (_prevTime != 0)
         {
-            auto t = getTime();
-            if (_prevTime != 0)
+            auto dt = 1000000.f / (t - _prevTime);
+            for (int i = 0; i < SENSOR_OUTPUT_DIM; i++)
             {
-                auto dt = 1000000.f / (t - _prevTime);
-                auto newVelocity = (newPos - pos) * dt;
-                acc = (newVelocity - velocity) * dt;
-                velocity = newVelocity;
-                pos = newPos;
+                pos = angs[i]; auto &obs = observations[i];
+                auto newVelocity = (pos - obs.pos) * dt;
+                obs.acc = (newVelocity - obs.velocity) * dt;
+                obs.velocity = newVelocity;
+                obs.pos = pos;
             }
-            else 
-            {
-                pos = newPos;
-                newPos = 1000;
-            }
-            _prevTime = t;
         }
-        return newPos;
+        else 
+        {
+            for (int i = 0; i < SENSOR_OUTPUT_DIM; i++)
+            {
+                observations[i].pos = angs[i];
+                // newPos = 1000;
+            }
+        }
+        _prevTime = t;
+        return pos;
     };
 };
 
@@ -59,6 +64,7 @@ public:
 
 class DynamicWithTimer : public Dynamics
 {
+    int64_t _prevTime = 0;
     float _revAcc;
     float _getTimerPeriod(float dx){
         if (acc == 0 and velocity != 0)
@@ -183,8 +189,8 @@ template <int rowSize, int colSize>
 using Matrix = Eigen::Matrix<float, rowSize, colSize>;
 #include <vector>
 
-#define ZERO_LIMIT 1e-4
-#define MAT_SIZE 6
+#define ZERO_LIMIT 1e-3
+#define MAT_SIZE 3 + SENSOR_OUTPUT_DIM * 3
 
 bool isZero(Vector<MAT_SIZE> col){
     return (col.array() == 0).all();
@@ -300,10 +306,20 @@ public:
 
     void changeEngineAcc()
     {
-        if (_sensor.update() == 1000) 
+        if (_sensor.update() == 1000000) 
             return;
-        Vector<MAT_SIZE> obs = {_engine.getAcc(), _sensor.getAcc(), _sensor.getVelocity(), 
-                                _sensor.getPos(), _engine.getVelocity(), _engine.getPos()};
+        // Vector<MAT_SIZE> obs = {_engine.getAcc(), _sensor.getAcc(), _sensor.getVelocity(), 
+        //                         _sensor.getPos(), _engine.getVelocity(), _engine.getPos()};
+        auto t = getTime();
+        Vector<MAT_SIZE> obs; 
+        obs[0] = _engine.acc;
+        int i = 1;
+        for (auto &&o: _sensor.observations)
+        {
+            obs.segment<3>(i) << o.pos, o.velocity, o.acc; 
+            i += 3;
+        }
+        obs.tail<2>() << _engine.velocity, _engine.pos;
         if (isZero(obs))
             return;
         float newAcc = NAN;
@@ -311,17 +327,17 @@ public:
         if (_height == MAT_SIZE)
         {
             _partialSolver.compute(_observations);
-            Matrix<MAT_SIZE, 3> ratios;
-            for (int i = 0; i < 3; i++)
+            Matrix<MAT_SIZE, 3 * SENSOR_OUTPUT_DIM> ratios;
+            for (int i = 0; i < 3 * SENSOR_OUTPUT_DIM; i++)
             {
                 auto sensData = _nextObservations(obs, i + 1);
                 ratios.col(i) = _partialSolver.solve(sensData);
             }
             int l = MAT_SIZE - 1;
-            Vector<3> b; b.noalias() = ratios.transpose().rightCols(l) * obs.tail(l);
-            Vector<3> a = ratios.row(0);
+            Vector<3 * SENSOR_OUTPUT_DIM> b; b.noalias() = ratios.transpose().rightCols(l) * obs.tail(l);
+            Vector<3 * SENSOR_OUTPUT_DIM> a = ratios.row(0);
             newAcc = - b.dot(a) / a.dot(a);
-            std::cout << obs.transpose() << " " << newAcc << "\n";
+            // std::cout << obs.transpose() << " " << newAcc << "\n";
             // counter ++;
             // // std::cout << counter << "\n";
             // if (counter == 100){
@@ -338,11 +354,12 @@ public:
                 auto obsBasis = _observations.bottomRows(_height)(Eigen::all, ind);
                 // auto m = Matrix<2, 2>({{1, 2, 3}, {3, 4}});
                 // auto obsBasis = m(Eigen::all, std::vector<int>({0, 1}));
+                // std::cout << obsBasis.rows() << obsBasis.cols() << _height << "\n";
                 auto dynSolver = obsBasis.partialPivLu();
                 // if (_fullSolver.rank() < 2)
                 //     return;
-                Eigen::Matrix<float, Eigen::Dynamic, 3, 0, MAT_SIZE> ratios(_height, 3);
-                for (int i = 0; i < 3; i++)
+                Eigen::Matrix<float, Eigen::Dynamic, 3 * SENSOR_OUTPUT_DIM, 0, MAT_SIZE> ratios(_height, 3 * SENSOR_OUTPUT_DIM);
+                for (int i = 0; i < 3 * SENSOR_OUTPUT_DIM; i++)
                 {
                     auto sensData = _nextObservations(obs, i + 1).bottomRows(_height);
                     // Vector<3> s {1, 1, 1};
@@ -350,8 +367,8 @@ public:
                     ratios.col(i) = dynSolver.solve(sensData);
                 }
                 int l = _height - 1;
-                Vector<3> b; b.noalias() = ratios.transpose().rightCols(l) * obs(ind).tail(l);
-                Vector<3> a = ratios.row(0);
+                Vector<3 * SENSOR_OUTPUT_DIM> b; b.noalias() = ratios.transpose().rightCols(l) * obs(ind).tail(l);
+                Vector<3 * SENSOR_OUTPUT_DIM> a = ratios.row(0);
                 newAcc = - b.dot(a) / a.dot(a);
                 // ri = _replacedIndex(obs);
             }
@@ -359,17 +376,25 @@ public:
             //     ri = _replacedIndex(obs);
         }
         ri = _replacedIndex(obs);
+        // if (_height < MAT_SIZE && ri < MAT_SIZE - _height && _height == 7)
+        //     ri = _replacedIndex(obs);
+        if (_height < MAT_SIZE && ri < MAT_SIZE - _height)
+            _height++;
+        // std::cout << ri << " ";
+        // if (_height == 8)
+        //     std::cout << _observations << "\n";
         for (int i = ri; i < MAT_SIZE - 1; i++)
         {
             _observations.row(i) = _observations.row(i + 1);
         }
         _observations.row(MAT_SIZE - 1) = obs.transpose();
-        if (_height < MAT_SIZE && ri < MAT_SIZE - _height)
-            _height++;
+        // if (_height == 8)
+        //     std::cout << _observations << "\n";
         if (!isnan(newAcc))
         {
             _engine.setAcc(newAcc); // printf("height=%i acc=%f\n", _height, newAcc);
         }
+        std::cout << getTime() - t << " ";
     }
 
     void test()
