@@ -60,7 +60,7 @@ void Engine::writeServo(int pos){
 }
 
 #define I2C_ADDRESS 0x1e
-static char tag[] = "hmc5883l";
+// static char tag[] = "hmc5883l";
 
 std::array<float, SENSOR_OUTPUT_DIM> Sensor::angles(){
     xSemaphoreTake(xMutexMpu, portMAX_DELAY);
@@ -170,7 +170,7 @@ void init_i2c()
 	i2c_master_start(cmd);
 	i2c_master_write_byte(cmd, (I2C_ADDRESS << 1) | I2C_MASTER_WRITE, 1);
 	i2c_master_write_byte(cmd, 0x02, 1); // Mode register
-	i2c_master_write_byte(cmd, 0x00, 1); // value 0
+	i2c_master_write_byte(cmd, 0x00, 1); // continuous mode 
 	i2c_master_stop(cmd);
 	i2c_master_cmd_begin(I2C_NUM_0, cmd, 1000/portTICK_PERIOD_MS);
 	i2c_cmd_link_delete(cmd);
@@ -178,8 +178,17 @@ void init_i2c()
 	cmd = i2c_cmd_link_create();
 	i2c_master_start(cmd);
 	i2c_master_write_byte(cmd, (I2C_ADDRESS << 1) | I2C_MASTER_WRITE, 1);
-	i2c_master_write_byte(cmd, 0x01, 1); // Mode register
-	i2c_master_write_byte(cmd, 0x20, 1); // value 0
+	i2c_master_write_byte(cmd, 0x00, 1); // A register
+	i2c_master_write_byte(cmd, 0x18, 1); // set 75Hz
+	i2c_master_stop(cmd);
+	i2c_master_cmd_begin(I2C_NUM_0, cmd, 1000/portTICK_PERIOD_MS);
+	i2c_cmd_link_delete(cmd);
+
+	cmd = i2c_cmd_link_create();
+	i2c_master_start(cmd);
+	i2c_master_write_byte(cmd, (I2C_ADDRESS << 1) | I2C_MASTER_WRITE, 1);
+	i2c_master_write_byte(cmd, 0x01, 1); // B register
+	i2c_master_write_byte(cmd, 0x20, 1); // set gain
 	i2c_master_stop(cmd);
 	i2c_master_cmd_begin(I2C_NUM_0, cmd, 1000/portTICK_PERIOD_MS);
 	i2c_cmd_link_delete(cmd);
