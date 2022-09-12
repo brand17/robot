@@ -4,7 +4,7 @@
 #ifndef ARDUINO
 #define constrain(amt, low, high) ((amt) < (low) ? (low) : ((amt) > (high) ? (high) : (amt)))
 #endif
-#define SENSOR_OUTPUT_DIM 3
+#define SENSOR_OUTPUT_DIM 1
 
 template <typename T>
 int sgn(T val)
@@ -45,6 +45,7 @@ public:
                 obs.acc = (newVelocity - obs.velocity) * dt;
                 obs.velocity = newVelocity;
                 obs.pos = pos;
+                // printf("pos: %2.0f, velocity: %4.0f, acc: %6.0f\n", obs.pos, obs.velocity, obs.acc);
             }
         }
         else 
@@ -310,7 +311,7 @@ public:
             return;
         // Vector<MAT_SIZE> obs = {_engine.getAcc(), _sensor.getAcc(), _sensor.getVelocity(), 
         //                         _sensor.getPos(), _engine.getVelocity(), _engine.getPos()};
-        auto t = getTime();
+        // auto t = getTime();
         Vector<MAT_SIZE> obs; 
         obs[0] = _engine.acc;
         int i = 1;
@@ -394,7 +395,7 @@ public:
         {
             _engine.setAcc(newAcc); // printf("height=%i acc=%f\n", _height, newAcc);
         }
-        std::cout << getTime() - t << " ";
+        // std::cout << getTime() - t << " ";
     }
 
     void test()
