@@ -87,15 +87,15 @@ std::array<float, SENSOR_OUTPUT_DIM> Sensor::angles(){
     i2c_master_cmd_begin(I2C_NUM_0, cmd, 1000/portTICK_PERIOD_MS);
     i2c_cmd_link_delete(cmd);
 
-    short x = data[0] << 8 | data[1];
-    short z = (data[2] << 8 | data[3]) + 650;
+    short x = (data[0] << 8 | data[1]) - 475;
+    short z = (data[2] << 8 | data[3]);
     short y = data[4] << 8 | data[5];
     // int angle = atan2((double)z,(double)x) * (180 / 3.14159265) + 180; // angle in degrees
-    // ESP_LOGI(tag, "x: %d, y: %d, z: %d", x, y, z);
+    // ESP_LOGI("angles", "x: %d, y: %d, z: %d", x, y, z);
     // vTaskDelay(1000/portTICK_PERIOD_MS);
 
     xSemaphoreGive(xMutexMpu);
-    return std::array<float, SENSOR_OUTPUT_DIM>{(float)x, (float)y, (float)z};
+    return std::array<float, SENSOR_OUTPUT_DIM>{(float)x};
 }
 
 Solver solver;
@@ -179,7 +179,7 @@ void init_i2c()
 	i2c_master_start(cmd);
 	i2c_master_write_byte(cmd, (I2C_ADDRESS << 1) | I2C_MASTER_WRITE, 1);
 	i2c_master_write_byte(cmd, 0x00, 1); // A register
-	i2c_master_write_byte(cmd, 0x18, 1); // set 75Hz
+	i2c_master_write_byte(cmd, 0x70, 1); // set 15Hz, oversampling 8
 	i2c_master_stop(cmd);
 	i2c_master_cmd_begin(I2C_NUM_0, cmd, 1000/portTICK_PERIOD_MS);
 	i2c_cmd_link_delete(cmd);
@@ -196,6 +196,7 @@ void init_i2c()
 
 void app_main(void)
 {
+    // ESP_ERROR_CHECK(iot_servo_write_angle(LEDC_LOW_SPEED_MODE, 0, 90)); usleep(50000000);
     // Eigen::PartialPivLU<Matrix<MAT_SIZE, MAT_SIZE>> _partialSolver;
     // Matrix<MAT_SIZE, MAT_SIZE> _observations = Matrix<MAT_SIZE, MAT_SIZE>::Random();
     // _partialSolver.compute(_observations);
