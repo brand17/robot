@@ -50,7 +50,7 @@ void Engine::initServo(){
         },
         .channel_number = 1,
     } ;
-    iot_servo_init(LEDC_LOW_SPEED_MODE, &servo_cfg);
+    ESP_ERROR_CHECK(iot_servo_init(LEDC_LOW_SPEED_MODE, &servo_cfg));
     writeServo(90);
 }
 
@@ -88,8 +88,8 @@ std::array<float, SENSOR_OUTPUT_DIM> Sensor::angles(){
     i2c_cmd_link_delete(cmd);
 
     short x = (data[0] << 8 | data[1]) - 475;
-    short z = (data[2] << 8 | data[3]);
-    short y = data[4] << 8 | data[5];
+    // short z = (data[2] << 8 | data[3]);
+    // short y = data[4] << 8 | data[5];
     // int angle = atan2((double)z,(double)x) * (180 / 3.14159265) + 180; // angle in degrees
     // ESP_LOGI("angles", "x: %d, y: %d, z: %d", x, y, z);
     // vTaskDelay(1000/portTICK_PERIOD_MS);

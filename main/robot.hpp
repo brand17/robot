@@ -18,15 +18,57 @@ class Dynamics
 {
 public:
     float pos = 0, velocity = 0, acc = 0;
-    // float getPos() { return _pos; }
-    // float getVelocity() { return _velocity; }
-    // float getAcc() { return _acc; }
     Dynamics(float p = 0, float v = 0, float a = 0) : pos(p), velocity(v), acc(a){};
 };
+
+#include <Eigen/Dense>
+
+class KalmanFilter
+{
+
+public:
+
+    KalmanFilter()
+    {
+        R = 1.3;
+        x_hat.setZero();
+        P = Eigen::DiagonalMatrix<float, 3>(1000, 1000, 1000);
+        I.setIdentity();
+    };
+
+    float get_pos(const float y, float dt)
+    {
+        F << 1, dt, dt * 0.5f,
+            0, 1, dt,
+            0, 0, 1;
+        update(y);
+        return x_hat(0);
+    }
+
+private:
+    void update(const float y);
+    Eigen::Matrix3f F, P;
+    float R;
+    Eigen::Matrix3f I;
+    Eigen::Vector3f K, x_hat, x_hat_new;
+};
+
+void KalmanFilter::update(const float y)
+{
+    x_hat_new = F * x_hat;
+    P = F * P * F.transpose();
+    K = P.col(0) / (P(0, 0) + R);
+    x_hat_new += K * (y - x_hat_new(0));
+    auto m_ = I;
+    m_.col(0) -= K;
+    P = m_ * P;
+    x_hat = x_hat_new;
+}
 
 class Sensor
 {
     int64_t _prevTime = 0;
+    KalmanFilter kf[SENSOR_OUTPUT_DIM];
 public:
     Dynamics observations[SENSOR_OUTPUT_DIM];
     std::array<float, SENSOR_OUTPUT_DIM> angles();
@@ -37,12 +79,16 @@ public:
         float pos = 1000000;
         if (_prevTime != 0)
         {
-            auto dt = 1000000.f / (t - _prevTime);
+            auto dt = t - _prevTime;
+            auto rev_dt = 1000000.f / (dt);
             for (int i = 0; i < SENSOR_OUTPUT_DIM; i++)
             {
                 pos = angs[i]; auto &obs = observations[i];
-                auto newVelocity = (pos - obs.pos) * dt;
-                obs.acc = (newVelocity - obs.velocity) * dt;
+                printf("pos: %2.0f ", pos);
+                pos = kf[i].get_pos(pos, dt);
+                printf("pos: %2.0f\n", pos);
+                auto newVelocity = (pos - obs.pos) * rev_dt;
+                obs.acc = (newVelocity - obs.velocity) * rev_dt;
                 obs.velocity = newVelocity;
                 obs.pos = pos;
                 // printf("pos: %2.0f, velocity: %4.0f, acc: %6.0f\n", obs.pos, obs.velocity, obs.acc);
@@ -182,7 +228,6 @@ public:
     }
 };
 
-#include <Eigen/Dense>
 using Eigen::seq;
 template <int Size>
 using Vector = Eigen::Vector<float, Size>;
