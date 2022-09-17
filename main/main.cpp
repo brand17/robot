@@ -180,7 +180,10 @@ void init_i2c()
 	i2c_master_write_byte(cmd, (I2C_ADDRESS << 1) | I2C_MASTER_WRITE, 1);
 	i2c_master_write_byte(cmd, 0x00, 1); // A register
 	// i2c_master_write_byte(cmd, 0x70, 1); // set 15Hz, oversampling 8
-	i2c_master_write_byte(cmd, 0x18, 1); // set 75Hz, no oversampling (1)
+	// i2c_master_write_byte(cmd, 0x34, 1); // set 30Hz, oversampling 2
+	i2c_master_write_byte(cmd, 0x54, 1); // set 30Hz, oversampling 4
+	// i2c_master_write_byte(cmd, 0x74, 1); // set 30Hz, oversampling 8
+	// i2c_master_write_byte(cmd, 0x18, 1); // set 75Hz, no oversampling (1)
 	i2c_master_stop(cmd);
 	i2c_master_cmd_begin(I2C_NUM_0, cmd, 1000/portTICK_PERIOD_MS);
 	i2c_cmd_link_delete(cmd);

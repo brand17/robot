@@ -53,11 +53,12 @@ void KalmanFilter::update(const float y)
     x_hat_new += K * (y - x_hat_new);
     P = (1 - K) * P;
     x_hat = x_hat_new;
-    ESP_LOGI("", "K: %2.5f P: %2.5f", K, P);
+    // ESP_LOGI("", "K: %2.5f P: %2.5f", K, P);
 }
 
 class Sensor
 {
+    long long __prevTime = 0;
     int64_t _prevTime = 0;
     KalmanFilter kf[SENSOR_OUTPUT_DIM];
 public:
@@ -75,8 +76,13 @@ public:
             for (int i = 0; i < SENSOR_OUTPUT_DIM; i++)
             {
                 pos = angs[i]; auto &obs = observations[i];
-                // printf("pos: %2.0f ", pos);
-                pos = kf[i].get_pos(pos, dt);
+                auto t2 = t / 1000000;
+                if (t2 != __prevTime)
+                {
+                    printf("%2.0f\n", pos);
+                    __prevTime = t2;
+                }
+                // pos = kf[i].get_pos(pos, dt);
                 // printf("pos: %2.0f\n", pos);
                 auto newVelocity = (pos - obs.pos) * rev_dt;
                 obs.acc = (newVelocity - obs.velocity) * rev_dt;
