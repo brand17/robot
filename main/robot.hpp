@@ -31,29 +31,39 @@ public:
     KalmanFilter()
     {
         R = 1.3;
-        x_hat = 0;
-        P = 0.0002;//0.00009;
+        x_hat.setZero();
+        P = Eigen::DiagonalMatrix<float, 3>(0.00113, 0.00113, 0.00113);
+        I.setIdentity();
     };
 
     float get_pos(const float y, float dt)
     {
+        F << 1, dt, dt * 0.5f,
+            0, 1, dt,
+            0, 0, 1;
         update(y);
-        return x_hat;
+        return x_hat(0);
     }
 
 private:
     void update(const float y);
-    float P, R, K, x_hat, x_hat_new;
+    Eigen::Matrix3f F, P;
+    float R;
+    Eigen::Matrix3f I;
+    Eigen::Vector3f K, x_hat, x_hat_new;
 };
 
 void KalmanFilter::update(const float y)
 {
-    x_hat_new = x_hat;
-    K = P / (P + R);
-    x_hat_new += K * (y - x_hat_new);
-    P = (1 - K) * P;
+    x_hat_new = F * x_hat;
+    P = F * P * F.transpose();
+    K = P.col(0) / (P(0, 0) + R);
+    x_hat_new += K * (y - x_hat_new(0));
+    auto m_ = I;
+    m_.col(0) -= K;
+    P = m_ * P;
     x_hat = x_hat_new;
-    // ESP_LOGI("", "K: %2.5f P: %2.5f", K, P);
+    // ESP_LOGI("", "K: %2.5f P: %2.5f", K(0, 0), P(0, 0));
 }
 
 class Sensor
@@ -82,7 +92,7 @@ public:
                     printf("%2.0f\n", pos);
                     __prevTime = t2;
                 }
-                // pos = kf[i].get_pos(pos, dt);
+                pos = kf[i].get_pos(pos, dt);
                 // printf("pos: %2.0f\n", pos);
                 auto newVelocity = (pos - obs.pos) * rev_dt;
                 obs.acc = (newVelocity - obs.velocity) * rev_dt;
