@@ -12,7 +12,7 @@
 #define PIN_SDA 21
 #define PIN_CLK 22
 
-#define GPIO_MPU_INTERRUPT GPIO_NUM_33
+#define GPIO_MPU_INTERRUPT GPIO_NUM_25
 #define ESP_INTR_FLAG_DEFAULT 0
 #define GPIO_SERVO GPIO_NUM_32
 #define TAG "example"
@@ -179,7 +179,8 @@ void init_i2c()
 	i2c_master_start(cmd);
 	i2c_master_write_byte(cmd, (I2C_ADDRESS << 1) | I2C_MASTER_WRITE, 1);
 	i2c_master_write_byte(cmd, 0x00, 1); // A register
-	i2c_master_write_byte(cmd, 0x70, 1); // set 15Hz, oversampling 8
+	// i2c_master_write_byte(cmd, 0x70, 1); // set 15Hz, oversampling 8
+	i2c_master_write_byte(cmd, 0x18, 1); // set 75Hz, no oversampling (1)
 	i2c_master_stop(cmd);
 	i2c_master_cmd_begin(I2C_NUM_0, cmd, 1000/portTICK_PERIOD_MS);
 	i2c_cmd_link_delete(cmd);
