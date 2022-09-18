@@ -27,7 +27,6 @@ class KalmanFilter
 {
 
 public:
-
     KalmanFilter()
     {
         R = 1.3;
@@ -46,30 +45,28 @@ public:
     }
 
 private:
-    void update(const float y);
+    void update(const float y)
+    {
+        x_hat_new = F * x_hat;
+        P = F * P * F.transpose();
+        K = P.col(0) / (P(0, 0) + R);
+        // auto P_ = P; auto x_ = x_hat_new;
+        x_hat_new += K * (y - x_hat_new(0));
+        auto m_ = I;
+        m_.col(0) -= K;
+        P = m_ * P;
+        // Eigen::MatrixXf m(3, 16); m << F, x_, P_, K, x_hat_new, P, Eigen::Vector3f(y, 0, 0), m_;
+        // std::string sep = "\n----------------------------------------\n";
+        // Eigen::IOFormat HeavyFmt(Eigen::FullPrecision, Eigen::DontAlignCols, " ", "\n", "", "", "", "");
+        // std::cout << m.format(HeavyFmt) << sep;
+        x_hat = x_hat_new;
+        // ESP_LOGI("", "K: %2.5f P: %2.5f", K(0, 0), P(0, 0));
+    }
     Eigen::Matrix3f F, P;
     float R;
     Eigen::Matrix3f I;
     Eigen::Vector3f K, x_hat, x_hat_new;
 };
-
-void KalmanFilter::update(const float y)
-{
-    x_hat_new = F * x_hat;
-    P = F * P * F.transpose();
-    K = P.col(0) / (P(0, 0) + R);
-    // auto P_ = P; auto x_ = x_hat_new;
-    x_hat_new += K * (y - x_hat_new(0));
-    auto m_ = I;
-    m_.col(0) -= K;
-    P = m_ * P;
-    // Eigen::MatrixXf m(3, 16); m << F, x_, P_, K, x_hat_new, P, Eigen::Vector3f(y, 0, 0), m_;
-    // std::string sep = "\n----------------------------------------\n";
-    // Eigen::IOFormat HeavyFmt(Eigen::FullPrecision, Eigen::DontAlignCols, " ", "\n", "", "", "", "");
-    // std::cout << m.format(HeavyFmt) << sep;
-    x_hat = x_hat_new;
-    // ESP_LOGI("", "K: %2.5f P: %2.5f", K(0, 0), P(0, 0));
-}
 
 class Sensor
 {
