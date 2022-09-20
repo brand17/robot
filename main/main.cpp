@@ -1,15 +1,19 @@
 #include "freertos/FreeRTOS.h"
 #include "sdkconfig.h"
 #include "freertos/task.h"
-#include "freertos/semphr.h"
 
+#include <driver/i2c.h>
 #include <esp_log.h>
 #include <esp_err.h>
 #include "iot_servo.h"
 #include "robot.hpp"
 #include "esp_timer.h"
 
-#define GPIO_TILT GPIO_NUM_36
+#define PIN_SDA 21
+#define PIN_CLK 22
+
+#define GPIO_MPU_INTERRUPT GPIO_NUM_25
+#define ESP_INTR_FLAG_DEFAULT 0
 #define GPIO_SERVO GPIO_NUM_32
 #define TAG "example"
 
@@ -22,8 +26,14 @@ extern "C" {
 	void app_main(void);
 }
 
+void IRAM_ATTR mpu_isr_handler(void* arg)
+{
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    xSemaphoreGiveFromISR(xBinarySemaphoreMpuInterrupt, &xHigherPriorityTaskWoken);
+    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+}
+
 void Engine::initServo(){
-    // ESP_LOGI("initServo", "started");
     servo_config_t servo_cfg = {
         .max_angle = 180,
         .min_width_us = 500,
@@ -49,20 +59,43 @@ void Engine::writeServo(int pos){
     ESP_ERROR_CHECK(iot_servo_write_angle(LEDC_LOW_SPEED_MODE, 0, pos));
 }
 
-#include "driver/adc.h"
-#include "esp_adc_cal.h"
-static esp_adc_cal_characteristics_t adc1_chars;
+#define I2C_ADDRESS 0x1e
+// static char tag[] = "hmc5883l";
 
-float Sensor::angle(){
+std::array<float, SENSOR_OUTPUT_DIM> Sensor::angles(){
     xSemaphoreTake(xMutexMpu, portMAX_DELAY);
     // printf("core is %i ", xPortGetCoreID());
-    auto r = adc1_get_raw(ADC1_CHANNEL_0);
-    auto voltage = esp_adc_cal_raw_to_voltage(r, &adc1_chars);
-    ESP_LOGI(TAG, "ADC1_CHANNEL_0: %d mV, raw: %i", voltage, r);
+	uint8_t data[6];
+    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+    i2c_master_start(cmd);
+    i2c_master_write_byte(cmd, (I2C_ADDRESS << 1) | I2C_MASTER_WRITE, 1);
+    i2c_master_write_byte(cmd, 0x03, 1); // Data registers
+    i2c_master_stop(cmd);
+    i2c_master_cmd_begin(I2C_NUM_0, cmd, 1000/portTICK_PERIOD_MS);
+    i2c_cmd_link_delete(cmd);
 
+    cmd = i2c_cmd_link_create();
+    i2c_master_start(cmd);
+    i2c_master_write_byte(cmd, (I2C_ADDRESS << 1) | I2C_MASTER_READ, 1);
+    i2c_master_read_byte(cmd, data,   (i2c_ack_type_t) 0);
+    i2c_master_read_byte(cmd, data+1, (i2c_ack_type_t) 0);
+    i2c_master_read_byte(cmd, data+2, (i2c_ack_type_t) 0);
+    i2c_master_read_byte(cmd, data+3, (i2c_ack_type_t) 0);
+    i2c_master_read_byte(cmd, data+4, (i2c_ack_type_t) 0);
+    i2c_master_read_byte(cmd, data+5, (i2c_ack_type_t) 1);
+    i2c_master_stop(cmd);
+    i2c_master_cmd_begin(I2C_NUM_0, cmd, 1000/portTICK_PERIOD_MS);
+    i2c_cmd_link_delete(cmd);
+
+    short x = (data[0] << 8 | data[1]) - 475;
+    // short z = (data[2] << 8 | data[3]);
+    // short y = data[4] << 8 | data[5];
+    // int angle = atan2((double)z,(double)x) * (180 / 3.14159265) + 180; // angle in degrees
+    // ESP_LOGI("angles", "x: %d, y: %d, z: %d", x, y, z);
     // vTaskDelay(1000/portTICK_PERIOD_MS);
+
     xSemaphoreGive(xMutexMpu);
-    return (float)voltage - 1300.f;
+    return std::array<float, SENSOR_OUTPUT_DIM>{(float)x};
 }
 
 Solver solver;
@@ -83,11 +116,15 @@ static void oneshot_timer_callback(void* arg)
 {
     // int64_t time_since_boot = esp_timer_get_time();
     // ESP_LOGI("oneshot_timer_callback", "One-shot timer called, time since boot: %lld us", time_since_boot);
+    // ESP_ERROR_CHECK(esp_timer_start_once(oneshot_timer, 1000000));
+    // time_since_boot = esp_timer_get_time();
+    // ESP_LOGI(TAG, "Restarted periodic timer with 1s period, time since boot: %lld us",
+    //         time_since_boot);
     // ESP_LOGI(TAG, "Starting moveEngine");
     solver.moveEngine();
 }
 
-int64_t Dynamics::getTime(){
+int64_t getTime(){
     return esp_timer_get_time();
 }
 
@@ -116,31 +153,63 @@ void DynamicWithTimer::initTimer(){
     _prevTime = getTime();
 }
 
-static void periodic_timer_callback(void *arg)
+void init_i2c()
 {
-    // int64_t time_since_boot = esp_timer_get_time();
-    // ESP_LOGI(TAG, "Periodic timer called, time since boot: %lld us", time_since_boot);
-    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-    xSemaphoreGiveFromISR(xBinarySemaphoreMpuInterrupt, &xHigherPriorityTaskWoken);
-    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+	i2c_config_t conf;
+	conf.mode = I2C_MODE_MASTER;
+	conf.sda_io_num = (gpio_num_t)PIN_SDA;
+	conf.scl_io_num = (gpio_num_t)PIN_CLK;
+	conf.sda_pullup_en = GPIO_PULLUP_ENABLE;
+	conf.scl_pullup_en = GPIO_PULLUP_ENABLE;
+	conf.master.clk_speed = 400000;
+    conf.clk_flags = 0;
+	ESP_ERROR_CHECK(i2c_param_config(I2C_NUM_0, &conf));
+	ESP_ERROR_CHECK(i2c_driver_install(I2C_NUM_0, I2C_MODE_MASTER, 0, 0, 0));
+
+	i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+	i2c_master_start(cmd);
+	i2c_master_write_byte(cmd, (I2C_ADDRESS << 1) | I2C_MASTER_WRITE, 1);
+	i2c_master_write_byte(cmd, 0x02, 1); // Mode register
+	i2c_master_write_byte(cmd, 0x00, 1); // continuous mode 
+	i2c_master_stop(cmd);
+	i2c_master_cmd_begin(I2C_NUM_0, cmd, 1000/portTICK_PERIOD_MS);
+	i2c_cmd_link_delete(cmd);
+
+	cmd = i2c_cmd_link_create();
+	i2c_master_start(cmd);
+	i2c_master_write_byte(cmd, (I2C_ADDRESS << 1) | I2C_MASTER_WRITE, 1);
+	i2c_master_write_byte(cmd, 0x00, 1); // A register
+	// i2c_master_write_byte(cmd, 0x70, 1); // set 15Hz, oversampling 8
+	// i2c_master_write_byte(cmd, 0x34, 1); // set 30Hz, oversampling 2
+	i2c_master_write_byte(cmd, 0x54, 1); // set 30Hz, oversampling 4
+	// i2c_master_write_byte(cmd, 0x74, 1); // set 30Hz, oversampling 8
+	// i2c_master_write_byte(cmd, 0x18, 1); // set 75Hz, no oversampling (1)
+	i2c_master_stop(cmd);
+	i2c_master_cmd_begin(I2C_NUM_0, cmd, 1000/portTICK_PERIOD_MS);
+	i2c_cmd_link_delete(cmd);
+
+	cmd = i2c_cmd_link_create();
+	i2c_master_start(cmd);
+	i2c_master_write_byte(cmd, (I2C_ADDRESS << 1) | I2C_MASTER_WRITE, 1);
+	i2c_master_write_byte(cmd, 0x01, 1); // B register
+	i2c_master_write_byte(cmd, 0x20, 1); // set gain
+	i2c_master_stop(cmd);
+	i2c_master_cmd_begin(I2C_NUM_0, cmd, 1000/portTICK_PERIOD_MS);
+	i2c_cmd_link_delete(cmd);
 }
 
 void app_main(void)
 {
-    auto adc_width = (adc_bits_width_t)ADC_WIDTH_BIT_DEFAULT;
-    esp_adc_cal_characterize(ADC_UNIT_1, ADC_ATTEN_DB_11, adc_width, 0, &adc1_chars);
-    ESP_ERROR_CHECK(adc1_config_width(adc_width));
-    ESP_ERROR_CHECK(adc1_config_channel_atten(ADC1_CHANNEL_0, ADC_ATTEN_DB_11));
-
-    const esp_timer_create_args_t periodic_timer_args = {
-            .callback = &periodic_timer_callback,
-            .name = "periodic"
-    };
-
-    esp_timer_handle_t periodic_timer;
-    ESP_ERROR_CHECK(esp_timer_create(&periodic_timer_args, &periodic_timer));
-
-    ESP_ERROR_CHECK(esp_timer_start_periodic(periodic_timer, 10000));
+    // ESP_ERROR_CHECK(iot_servo_write_angle(LEDC_LOW_SPEED_MODE, 0, 90)); usleep(50000000);
+    // Eigen::PartialPivLU<Matrix<MAT_SIZE, MAT_SIZE>> _partialSolver;
+    // Matrix<MAT_SIZE, MAT_SIZE> _observations = Matrix<MAT_SIZE, MAT_SIZE>::Random();
+    // _partialSolver.compute(_observations);
+    // for (int i = 0; i < 1000; i++)
+    // {
+    //     std::cout << i << "\n";
+    //     Vector<MAT_SIZE> sensData = Vector<MAT_SIZE>::Random();
+    //     auto ratios = _partialSolver.solve(sensData);
+    // }
 
     // ESP_LOGI(TAG, "Started app_main");
     // while (true)
@@ -157,24 +226,27 @@ void app_main(void)
     //     usleep(20000);
     // }
 
-    // engine.initTimer();
-    // engine.setAcc(1);
     solver.initEngineTimer();
     
-    // usleep(5000000);
-    // ESP_LOGI(TAG, "Reverse");
-    // solver.setEngineAcc(-1);
-    // usleep(10000000);
-    // esp_timer_stop(oneshot_timer);
-
     // for (auto &a: {1, -1}){
     //     engine.setAcc(a);
     //     usleep(20000);
     // }
 
+    init_i2c();
+    gpio_config_t io_conf = {};
+    io_conf.intr_type = GPIO_INTR_POSEDGE;
+    io_conf.pin_bit_mask = 1ULL<<GPIO_MPU_INTERRUPT;
+    io_conf.mode = GPIO_MODE_INPUT;
+    io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
+    gpio_config(&io_conf);
+    gpio_set_intr_type(GPIO_MPU_INTERRUPT, GPIO_INTR_NEGEDGE);
+    gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
+    gpio_isr_handler_add(GPIO_MPU_INTERRUPT, mpu_isr_handler, (void*) GPIO_MPU_INTERRUPT);
+    vTaskDelay(500/portTICK_PERIOD_MS);
     // solver.test();
-    xTaskCreatePinnedToCore(&task_display, "disp_task", 8192, NULL, 1, NULL, 0);
-    // xTaskCreatePinnedToCore(&task_display, "disp_task", 8192, NULL, 1, NULL, 1);
+    xTaskCreatePinnedToCore(&task_display, "disp_task", 8192, NULL, tskIDLE_PRIORITY, NULL, 0);
+    // xTaskCreatePinnedToCore(&task_display, "disp_task", 8192, NULL, tskIDLE_PRIORITY, NULL, 1);
 
     // xTaskCreate(&task_display, "disp_task", 8192, NULL, 1, NULL);
     // xTaskCreate(&task_display, "disp_task", 8192, NULL, 1, NULL);
