@@ -5,16 +5,15 @@
 #include <driver/i2c.h>
 #include <esp_log.h>
 #include <esp_err.h>
-#include "iot_servo.h"
 #include "robot.hpp"
 #include "esp_timer.h"
+#include "driver/mcpwm.h"
 
 #define PIN_SDA 21
 #define PIN_CLK 22
 
 #define GPIO_MPU_INTERRUPT GPIO_NUM_25
 #define ESP_INTR_FLAG_DEFAULT 0
-#define GPIO_SERVO GPIO_NUM_32
 #define TAG "example"
 
 #include <iostream>
@@ -33,30 +32,42 @@ void IRAM_ATTR mpu_isr_handler(void* arg)
     portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 
-void Engine::initServo(){
-    servo_config_t servo_cfg = {
-        .max_angle = 180,
-        .min_width_us = 500,
-        .max_width_us = 2500,
-        .freq = 50,
-        .timer_number = LEDC_TIMER_0,
-        .channels = {
-            .servo_pin = {
-                GPIO_SERVO,
-            },
-            .ch = {
-                LEDC_CHANNEL_0,
-            },
-        },
-        .channel_number = 1,
-    } ;
-    ESP_ERROR_CHECK(iot_servo_init(LEDC_LOW_SPEED_MODE, &servo_cfg));
-    writeServo(90);
+#define MOTOR_CTRL_MCPWM_UNIT   MCPWM_UNIT_0
+#define MOTOR_CTRL_MCPWM_TIMER  MCPWM_TIMER_0
+#define GPIO_PWM0A_OUT 32   //Set GPIO 15 as PWM0A
+#define GPIO_PWM0B_OUT 33   //Set GPIO 16 as PWM0B
+
+void brushed_motor_set_duty(float duty_cycle)
+{
+    /* motor moves in forward direction, with duty cycle = duty % */
+    if (duty_cycle > 0) {
+        mcpwm_set_signal_low(MOTOR_CTRL_MCPWM_UNIT, MOTOR_CTRL_MCPWM_TIMER, MCPWM_OPR_A);
+        mcpwm_set_duty(MOTOR_CTRL_MCPWM_UNIT, MOTOR_CTRL_MCPWM_TIMER, MCPWM_OPR_B, duty_cycle);
+        mcpwm_set_duty_type(MOTOR_CTRL_MCPWM_UNIT, MOTOR_CTRL_MCPWM_TIMER, MCPWM_OPR_B, MCPWM_DUTY_MODE_0);  //call this each time, if operator was previously in low/high state
+    }
+    /* motor moves in backward direction, with duty cycle = -duty % */
+    else {
+        mcpwm_set_signal_low(MOTOR_CTRL_MCPWM_UNIT, MOTOR_CTRL_MCPWM_TIMER, MCPWM_OPR_B);
+        mcpwm_set_duty(MOTOR_CTRL_MCPWM_UNIT, MOTOR_CTRL_MCPWM_TIMER, MCPWM_OPR_A, -duty_cycle);
+        mcpwm_set_duty_type(MOTOR_CTRL_MCPWM_UNIT, MOTOR_CTRL_MCPWM_TIMER, MCPWM_OPR_A, MCPWM_DUTY_MODE_0); //call this each time, if operator was previously in low/high state
+    }
+}
+
+void Engine::initEngine(){
+    ESP_ERROR_CHECK(mcpwm_gpio_init(MOTOR_CTRL_MCPWM_UNIT, MCPWM0A, GPIO_PWM0A_OUT));
+    ESP_ERROR_CHECK(mcpwm_gpio_init(MOTOR_CTRL_MCPWM_UNIT, MCPWM0B, GPIO_PWM0B_OUT));
+    mcpwm_config_t pwm_config;
+    pwm_config.frequency = 1000;     //frequency = 1kHz,
+    pwm_config.cmpr_a = 0;                              //initial duty cycle of PWMxA = 0
+    pwm_config.cmpr_b = 0;                              //initial duty cycle of PWMxb = 0
+    pwm_config.counter_mode = MCPWM_UP_COUNTER;         //up counting mode
+    pwm_config.duty_mode = MCPWM_DUTY_MODE_0;
+    ESP_ERROR_CHECK(mcpwm_init(MOTOR_CTRL_MCPWM_UNIT, MOTOR_CTRL_MCPWM_TIMER, &pwm_config));    //Configure PWM0A & PWM0B with above settings
 }
 
 void Engine::writeServo(int pos){
     // ESP_LOGI("writeServo", "Servo angle: %i", pos);
-    ESP_ERROR_CHECK(iot_servo_write_angle(LEDC_LOW_SPEED_MODE, 0, pos));
+    brushed_motor_set_duty(100); 
 }
 
 #define I2C_ADDRESS 0x1e
@@ -200,6 +211,11 @@ void init_i2c()
 
 void app_main(void)
 {
+    brushed_motor_set_duty(100); 
+    // ESP_LOGI("initEngine", "Starting the engine");
+    // usleep(10000000);
+    // ESP_LOGI("initEngine", "Stopping the engine");
+    // usleep(10000000);
     // ESP_ERROR_CHECK(iot_servo_write_angle(LEDC_LOW_SPEED_MODE, 0, 90)); usleep(50000000);
     // Eigen::PartialPivLU<Matrix<MAT_SIZE, MAT_SIZE>> _partialSolver;
     // Matrix<MAT_SIZE, MAT_SIZE> _observations = Matrix<MAT_SIZE, MAT_SIZE>::Random();
@@ -226,7 +242,7 @@ void app_main(void)
     //     usleep(20000);
     // }
 
-    solver.initEngineTimer();
+    // solver.initEngineTimer();
     
     // for (auto &a: {1, -1}){
     //     engine.setAcc(a);

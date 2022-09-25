@@ -94,7 +94,7 @@ public:
                     // printf("%2.0f\n", pos);
                     __prevTime = t2;
                 }
-                // printf("pos: %2.0f ", pos);
+                printf("pos: %2.0f \n", pos);
                 pos = kf[i].get_pos(pos, dt);
                 // printf("pos: %2.0f\n", pos);
                 auto newVelocity = (pos - obs.pos) * rev_dt;
@@ -195,23 +195,23 @@ public:
         _updatePosAndVelocity();
         acc = a;
         _revAcc = 1 / acc;
-        auto timerPeriod = _getTimerPeriod();
-        stopTimer();
-        setTimerPeriod(timerPeriod);
+        // auto timerPeriod = _getTimerPeriod();
+        // stopTimer();
+        // setTimerPeriod(timerPeriod);
     }
 };
 
 class Engine : public DynamicWithTimer
 {
     void writeServo(int pos);
-    void initServo();
+    void initEngine();
 
 public:
     Engine(){}
 
     Engine(DynamicWithTimer initial) : DynamicWithTimer(initial.pos, initial.velocity, initial.acc)
     {
-        initServo();
+        initEngine();
     };
 
     void moveEngine()
@@ -395,7 +395,7 @@ public:
             Vector<3 * SENSOR_OUTPUT_DIM> a = ratios.row(0);
             newAcc = - b.dot(a) / a.dot(a);
             Eigen::IOFormat HeavyFmt(Eigen::FullPrecision, Eigen::DontAlignCols, " ", "\n", "", "", "\n", "");
-            std::cout << ratios.transpose().format(HeavyFmt);
+            // std::cout << ratios.transpose().format(HeavyFmt);
             // std::cout << obs.transpose() << " " << newAcc << "\n";
             // counter ++;
             // // std::cout << counter << "\n";
