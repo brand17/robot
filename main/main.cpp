@@ -9,12 +9,11 @@
 #include "esp_timer.h"
 #include "driver/mcpwm.h"
 
-#define PIN_SDA 21
-#define PIN_CLK 22
+#define PIN_SDA_GY271 21
+#define PIN_CLK_GY271 22
 
-#define GPIO_MPU_INTERRUPT GPIO_NUM_25
+#define GPIO_GY271_INTERRUPT GPIO_NUM_36
 #define ESP_INTR_FLAG_DEFAULT 0
-#define TAG "example"
 
 #include <iostream>
 
@@ -25,7 +24,7 @@ extern "C" {
 	void app_main(void);
 }
 
-void IRAM_ATTR mpu_isr_handler(void* arg)
+void IRAM_ATTR gy271_isr_handler(void* arg)
 {
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
     xSemaphoreGiveFromISR(xBinarySemaphoreMpuInterrupt, &xHigherPriorityTaskWoken);
@@ -34,8 +33,8 @@ void IRAM_ATTR mpu_isr_handler(void* arg)
 
 #define MOTOR_CTRL_MCPWM_UNIT   MCPWM_UNIT_0
 #define MOTOR_CTRL_MCPWM_TIMER  MCPWM_TIMER_0
-#define GPIO_PWM0A_OUT 32   //Set GPIO 15 as PWM0A
-#define GPIO_PWM0B_OUT 33   //Set GPIO 16 as PWM0B
+#define GPIO_PWM0A_OUT 19
+#define GPIO_PWM0B_OUT 23
 
 void brushed_motor_set_duty(float duty_cycle)
 {
@@ -67,10 +66,10 @@ void Engine::initEngine(){
 
 void Engine::writeServo(int pos){
     // ESP_LOGI("writeServo", "Servo angle: %i", pos);
-    brushed_motor_set_duty(100); 
+    // brushed_motor_set_duty(100); 
 }
 
-#define I2C_ADDRESS 0x1e
+#define I2C_ADDRESS_GY271 0x1e
 // static char tag[] = "hmc5883l";
 
 std::array<float, SENSOR_OUTPUT_DIM> Sensor::angles(){
@@ -79,7 +78,7 @@ std::array<float, SENSOR_OUTPUT_DIM> Sensor::angles(){
 	uint8_t data[6];
     i2c_cmd_handle_t cmd = i2c_cmd_link_create();
     i2c_master_start(cmd);
-    i2c_master_write_byte(cmd, (I2C_ADDRESS << 1) | I2C_MASTER_WRITE, 1);
+    i2c_master_write_byte(cmd, (I2C_ADDRESS_GY271 << 1) | I2C_MASTER_WRITE, 1);
     i2c_master_write_byte(cmd, 0x03, 1); // Data registers
     i2c_master_stop(cmd);
     i2c_master_cmd_begin(I2C_NUM_0, cmd, 1000/portTICK_PERIOD_MS);
@@ -87,7 +86,7 @@ std::array<float, SENSOR_OUTPUT_DIM> Sensor::angles(){
 
     cmd = i2c_cmd_link_create();
     i2c_master_start(cmd);
-    i2c_master_write_byte(cmd, (I2C_ADDRESS << 1) | I2C_MASTER_READ, 1);
+    i2c_master_write_byte(cmd, (I2C_ADDRESS_GY271 << 1) | I2C_MASTER_READ, 1);
     i2c_master_read_byte(cmd, data,   (i2c_ack_type_t) 0);
     i2c_master_read_byte(cmd, data+1, (i2c_ack_type_t) 0);
     i2c_master_read_byte(cmd, data+2, (i2c_ack_type_t) 0);
@@ -164,12 +163,46 @@ void DynamicWithTimer::initTimer(){
     _prevTime = getTime();
 }
 
+#define PIN_SDA_AS5600 32
+#define PIN_CLK_AS5600 33
+#define AS5600_SLAVE_ADDR 0x36
+#define AS5600_ANGLE_REGISTER_H 0x0E
+
+IRAM_ATTR static uint16_t read_angle_AS5600() 
+{
+    uint8_t write_buffer = AS5600_ANGLE_REGISTER_H;
+    uint8_t read_buffer[2] = {0,0};
+    uint16_t raw;
+    esp_err_t err;
+
+    do {
+        err =  i2c_master_write_read_device(I2C_NUM_1,
+                                        AS5600_SLAVE_ADDR,
+                                        &write_buffer,
+                                        1,
+                                        read_buffer,
+                                        2,
+                                        portMAX_DELAY);
+ 
+    } while (err != ESP_OK);
+
+    raw = read_buffer[0];
+    raw <<= 8;
+    raw |= read_buffer[1];
+
+    // if(raw > AS5600_PULSES_PER_REVOLUTION - 1) {
+    //     raw = AS5600_PULSES_PER_REVOLUTION - 1 ;
+    // }
+
+    return raw;
+}
+
 void init_i2c()
 {
 	i2c_config_t conf;
 	conf.mode = I2C_MODE_MASTER;
-	conf.sda_io_num = (gpio_num_t)PIN_SDA;
-	conf.scl_io_num = (gpio_num_t)PIN_CLK;
+	conf.sda_io_num = (gpio_num_t)PIN_SDA_GY271;
+	conf.scl_io_num = (gpio_num_t)PIN_CLK_GY271;
 	conf.sda_pullup_en = GPIO_PULLUP_ENABLE;
 	conf.scl_pullup_en = GPIO_PULLUP_ENABLE;
 	conf.master.clk_speed = 400000;
@@ -179,7 +212,7 @@ void init_i2c()
 
 	i2c_cmd_handle_t cmd = i2c_cmd_link_create();
 	i2c_master_start(cmd);
-	i2c_master_write_byte(cmd, (I2C_ADDRESS << 1) | I2C_MASTER_WRITE, 1);
+	i2c_master_write_byte(cmd, (I2C_ADDRESS_GY271 << 1) | I2C_MASTER_WRITE, 1);
 	i2c_master_write_byte(cmd, 0x02, 1); // Mode register
 	i2c_master_write_byte(cmd, 0x00, 1); // continuous mode 
 	i2c_master_stop(cmd);
@@ -188,7 +221,7 @@ void init_i2c()
 
 	cmd = i2c_cmd_link_create();
 	i2c_master_start(cmd);
-	i2c_master_write_byte(cmd, (I2C_ADDRESS << 1) | I2C_MASTER_WRITE, 1);
+	i2c_master_write_byte(cmd, (I2C_ADDRESS_GY271 << 1) | I2C_MASTER_WRITE, 1);
 	i2c_master_write_byte(cmd, 0x00, 1); // A register
 	// i2c_master_write_byte(cmd, 0x70, 1); // set 15Hz, oversampling 8
 	// i2c_master_write_byte(cmd, 0x34, 1); // set 30Hz, oversampling 2
@@ -201,12 +234,23 @@ void init_i2c()
 
 	cmd = i2c_cmd_link_create();
 	i2c_master_start(cmd);
-	i2c_master_write_byte(cmd, (I2C_ADDRESS << 1) | I2C_MASTER_WRITE, 1);
+	i2c_master_write_byte(cmd, (I2C_ADDRESS_GY271 << 1) | I2C_MASTER_WRITE, 1);
 	i2c_master_write_byte(cmd, 0x01, 1); // B register
 	i2c_master_write_byte(cmd, 0x20, 1); // set gain
 	i2c_master_stop(cmd);
 	i2c_master_cmd_begin(I2C_NUM_0, cmd, 1000/portTICK_PERIOD_MS);
 	i2c_cmd_link_delete(cmd);
+
+	conf.mode = I2C_MODE_MASTER;
+	conf.sda_io_num = (gpio_num_t)PIN_SDA_AS5600;
+	conf.scl_io_num = (gpio_num_t)PIN_CLK_AS5600;
+	conf.sda_pullup_en = GPIO_PULLUP_ENABLE;
+	conf.scl_pullup_en = GPIO_PULLUP_ENABLE;
+	conf.master.clk_speed = 1000000;
+    conf.clk_flags = 0;
+	ESP_ERROR_CHECK(i2c_param_config(I2C_NUM_1, &conf));
+	ESP_ERROR_CHECK(i2c_driver_install(I2C_NUM_1, I2C_MODE_MASTER, 0, 0, 0));
+    i2c_filter_enable(I2C_NUM_1, 7);
 }
 
 void app_main(void)
@@ -250,15 +294,21 @@ void app_main(void)
     // }
 
     init_i2c();
+    while (true)
+    {
+        auto r = read_angle_AS5600();
+        std::cout << r << "\n";
+        usleep(100000);
+    }
     gpio_config_t io_conf = {};
     io_conf.intr_type = GPIO_INTR_POSEDGE;
-    io_conf.pin_bit_mask = 1ULL<<GPIO_MPU_INTERRUPT;
+    io_conf.pin_bit_mask = 1ULL<<GPIO_GY271_INTERRUPT;
     io_conf.mode = GPIO_MODE_INPUT;
     io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
     gpio_config(&io_conf);
-    gpio_set_intr_type(GPIO_MPU_INTERRUPT, GPIO_INTR_NEGEDGE);
+    gpio_set_intr_type(GPIO_GY271_INTERRUPT, GPIO_INTR_NEGEDGE);
     gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
-    gpio_isr_handler_add(GPIO_MPU_INTERRUPT, mpu_isr_handler, (void*) GPIO_MPU_INTERRUPT);
+    gpio_isr_handler_add(GPIO_GY271_INTERRUPT, gy271_isr_handler, (void*) GPIO_GY271_INTERRUPT);
     vTaskDelay(500/portTICK_PERIOD_MS);
     // solver.test();
     xTaskCreatePinnedToCore(&task_display, "disp_task", 8192, NULL, tskIDLE_PRIORITY, NULL, 0);

@@ -94,7 +94,7 @@ public:
                     // printf("%2.0f\n", pos);
                     __prevTime = t2;
                 }
-                printf("pos: %2.0f \n", pos);
+                // printf("pos: %2.0f \n", pos);
                 pos = kf[i].get_pos(pos, dt);
                 // printf("pos: %2.0f\n", pos);
                 auto newVelocity = (pos - obs.pos) * rev_dt;
