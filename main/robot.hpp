@@ -57,8 +57,8 @@ private:
         P = m_ * P;
         // Eigen::MatrixXf m(3, 16); m << F, x_, P_, K, x_hat_new, P, Eigen::Vector3f(y, 0, 0), m_;
         // std::string sep = "\n----------------------------------------\n";
-        // Eigen::IOFormat HeavyFmt(Eigen::FullPrecision, Eigen::DontAlignCols, " ", "\n", "", "", "", "");
-        // std::cout << m.format(HeavyFmt) << sep;
+        // Eigen::IOFormat _HeavyFmt(Eigen::FullPrecision, Eigen::DontAlignCols, " ", "\n", "", "", "", "");
+        // std::cout << m.format(_HeavyFmt) << sep;
         x_hat = x_hat_new;
         // ESP_LOGI("", "K: %2.5f P: %2.5f", K(0, 0), P(0, 0));
     }
@@ -75,7 +75,7 @@ class Sensor
     KalmanFilter kf[SENSOR_OUTPUT_DIM];
 public:
     Dynamics observations[SENSOR_OUTPUT_DIM];
-    std::array<float, SENSOR_OUTPUT_DIM> angles();
+    virtual std::array<float, SENSOR_OUTPUT_DIM> angles();
     float update()
     {
         auto angs = angles();
@@ -95,7 +95,7 @@ public:
                     __prevTime = t2;
                 }
                 // printf("pos: %2.0f \n", pos);
-                pos = kf[i].get_pos(pos, dt);
+                // pos = kf[i].get_pos(pos, dt);
                 // printf("pos: %2.0f\n", pos);
                 auto newVelocity = (pos - obs.pos) * rev_dt;
                 obs.acc = (newVelocity - obs.velocity) * rev_dt;
@@ -119,123 +119,12 @@ public:
 
 #include <float.h>
 
-class DynamicWithTimer : public Dynamics
+class Engine : public Sensor
 {
-    int64_t _prevTime = 0;
-    float _revAcc;
-    float _getTimerPeriod(float dx){
-        if (acc == 0 and velocity != 0)
-        {
-            return dx / velocity;
-        }
-        auto D = velocity * velocity + 2 * acc * dx;
-        if (D >= 0){
-            D = sqrtf(D);
-            auto tp1 = (-velocity + D) * _revAcc;
-            auto tp2 = (-velocity - D) * _revAcc;
-            if (tp1 <= 0)
-                return tp2;
-            if (tp2 <= 0)
-                return tp1;
-            return std::fmin(tp1, tp2);
-        }
-        return FLT_MAX;
-    }
-
-    void stopTimer();
-
-protected:
-    void setTimerPeriod(float timerPeriod);
-
-    void _updatePosAndVelocity()
-    {
-        auto time_since_boot = getTime();
-        auto dt = (time_since_boot - _prevTime) / 1000000.f;
-        _prevTime = time_since_boot;
-        auto dv = acc * dt;
-        pos += dt * (velocity + dv * 0.5);
-        velocity += dv;
-        // ESP_LOGI("_updatePosAndVelocity", "pos %f velocity %f", pos, velocity);
-    }
-
-    float _getTimerPeriod()
-    {
-        float timerPeriod = FLT_MAX;
-        float dx = 0;
-        if (acc > 0 or velocity > 0)
-        { // the second option
-            dx = floorf(pos) + 1 - pos;
-            // ESP_LOGI("_getTimerPeriod", "velocity %f acc %f dx %f pos %f", velocity, acc, dx, pos);
-            timerPeriod = _getTimerPeriod(dx);
-        }
-        if (acc < 0 or velocity < 0)
-        { // the first option
-            auto dx2 = ceilf(pos) - 1 - pos;
-            // ESP_LOGI("_getTimerPeriod", "velocity %f acc %f dx2 %f pos %f", velocity, acc, dx2, pos);
-            auto tp = _getTimerPeriod(dx2);
-            if (timerPeriod > tp){
-                timerPeriod = tp;
-                dx = dx2;
-            }
-        }
-        // ESP_LOGI("_getTimerPeriod", "velocity %f acc %f dx %f pos %f", velocity, acc, dx, pos);
-        return timerPeriod;
-    }
-
 public:
-    DynamicWithTimer(float p = 0, float v = 0, float a = 0) : Dynamics(p, v, a)
-    {
-        _revAcc = 1 / a;
-    };
-
-    void initTimer();
-
-    void setAcc(float a)
-    {
-        _updatePosAndVelocity();
-        acc = a;
-        _revAcc = 1 / acc;
-        // auto timerPeriod = _getTimerPeriod();
-        // stopTimer();
-        // setTimerPeriod(timerPeriod);
-    }
-};
-
-class Engine : public DynamicWithTimer
-{
-    void writeServo(int pos);
-    void initEngine();
-
-public:
-    Engine(){}
-
-    Engine(DynamicWithTimer initial) : DynamicWithTimer(initial.pos, initial.velocity, initial.acc)
-    {
-        initEngine();
-    };
-
-    void moveEngine()
-    {
-        // printf("move Engine started... ");
-        _updatePosAndVelocity();
-        // ESP_LOGI("moveEngine", "velocity %f acc %f pos %f sv %f sp %f", velocity, acc, pos, _sensor.getVelocity(), _sensor.getPos());
-        pos = roundf(pos);
-        auto timerPeriod = _getTimerPeriod();
-        setTimerPeriod(timerPeriod);
-
-        if (abs(pos) > 90){ // to do: move to _updatePosAndVelocity to improve acc calculation
-            pos = constrain(pos, -90, 90);
-            velocity = 0;
-            acc = 0;
-        }
-        if (abs(velocity) > 400)
-        {
-            velocity = constrain(velocity, -400, 400);
-            acc = 0;
-        }
-        // std::cout << velocity << " " << acc << " " << pos << "\n";
-        writeServo(pos + 90);
-    }
+    Engine();
+    void setDuty(float duty);
+    virtual std::array<float, SENSOR_OUTPUT_DIM> angles();
 };
 
 using Eigen::seq;
@@ -244,9 +133,10 @@ using Vector = Eigen::Vector<float, Size>;
 template <int rowSize, int colSize>
 using Matrix = Eigen::Matrix<float, rowSize, colSize>;
 #include <vector>
+Eigen::IOFormat _HeavyFmt(Eigen::FullPrecision, Eigen::DontAlignCols, " ", "\n", "", "", "\n", "");
 
 #define ZERO_LIMIT 1e-3
-#define MAT_SIZE 3 + SENSOR_OUTPUT_DIM * 3
+#define MAT_SIZE 3 + SENSOR_OUTPUT_DIM * 3 + 1
 
 bool isZero(Vector<MAT_SIZE> col){
     return (col.array() == 0).all();
@@ -260,6 +150,7 @@ class Solver
 
     Matrix<MAT_SIZE, MAT_SIZE> _observations = Matrix<MAT_SIZE, MAT_SIZE>::Zero();
     int _height = 0;
+    float _duty = 0;
 
     std::vector<int> _getBasisIndices()
     {
@@ -341,46 +232,33 @@ public:
     {
         // printf("Solver constructor called\n");
         _sensor = Sensor();
-        _engine = Engine(DynamicWithTimer(0, 0, 1));
+        _engine = Engine();
     }
-
-    void initEngineTimer()
-    {
-        _engine.initTimer();
-    }
-
-    void setEngineAcc(float a)
-    {
-        _engine.setAcc(a);
-    }
-
-    void moveEngine()
-    {
-        _engine.moveEngine();
-    }
-
-    // int counter = 0;
 
     void changeEngineAcc()
     {
-        if (_sensor.update() == 1000000) 
+        auto s = _sensor.update();
+        auto e = _engine.update();
+        if (s == 1000000 or e == 1000000) 
             return;
         // Vector<MAT_SIZE> obs = {_engine.getAcc(), _sensor.getAcc(), _sensor.getVelocity(), 
         //                         _sensor.getPos(), _engine.getVelocity(), _engine.getPos()};
         // auto t = getTime();
         Vector<MAT_SIZE> obs; 
-        obs[0] = _engine.acc;
+        obs[0] = _duty;
         int i = 1;
         for (auto &&o: _sensor.observations)
         {
             obs.segment<3>(i) << o.pos, o.velocity, o.acc; 
             i += 3;
         }
-        obs.tail<2>() << _engine.velocity, _engine.pos;
+        auto engObs = &_engine.observations[0];
+        obs.tail<3>() << engObs->pos, engObs->velocity, engObs->acc;
         if (isZero(obs))
             return;
         float newAcc = NAN;
         int ri;
+        // std::cout << _height << '\n';
         if (_height == MAT_SIZE)
         {
             _partialSolver.compute(_observations);
@@ -394,9 +272,8 @@ public:
             Vector<3 * SENSOR_OUTPUT_DIM> b; b.noalias() = ratios.transpose().rightCols(l) * obs.tail(l);
             Vector<3 * SENSOR_OUTPUT_DIM> a = ratios.row(0);
             newAcc = - b.dot(a) / a.dot(a);
-            Eigen::IOFormat HeavyFmt(Eigen::FullPrecision, Eigen::DontAlignCols, " ", "\n", "", "", "\n", "");
-            // std::cout << ratios.transpose().format(HeavyFmt);
-            // std::cout << obs.transpose() << " " << newAcc << "\n";
+            // std::cout << ratios.transpose().format(_HeavyFmt);
+            std::cout << obs.transpose().format(_HeavyFmt) << " " << newAcc;// << "\n";
             // counter ++;
             // // std::cout << counter << "\n";
             // if (counter == 100){
@@ -429,6 +306,8 @@ public:
                 Vector<3 * SENSOR_OUTPUT_DIM> b; b.noalias() = ratios.transpose().rightCols(l) * obs(ind).tail(l);
                 Vector<3 * SENSOR_OUTPUT_DIM> a = ratios.row(0);
                 newAcc = - b.dot(a) / a.dot(a);
+                // std::cout << ratios.transpose().format(_HeavyFmt);
+                std::cout << obs.transpose().format(_HeavyFmt) << " " << newAcc;// << "\n";
                 // ri = _replacedIndex(obs);
             }
             // else
@@ -451,7 +330,8 @@ public:
         //     std::cout << _observations << "\n";
         if (!isnan(newAcc))
         {
-            _engine.setAcc(newAcc); // printf("height=%i acc=%f\n", _height, newAcc);
+            _duty = constrain(newAcc, -100, 100);
+            _engine.setDuty(_duty); // printf("height=%i acc=%f\n", _height, newAcc);
         }
         // std::cout << getTime() - t << " ";
     }

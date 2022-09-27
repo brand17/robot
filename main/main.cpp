@@ -17,7 +17,7 @@
 
 #include <iostream>
 
-SemaphoreHandle_t xBinarySemaphoreMpuInterrupt = xSemaphoreCreateBinary();
+SemaphoreHandle_t xBinarySemaphoreGY271Interrupt = xSemaphoreCreateBinary();
 SemaphoreHandle_t xMutexMpu = xSemaphoreCreateMutex();
  
 extern "C" {
@@ -27,7 +27,7 @@ extern "C" {
 void IRAM_ATTR gy271_isr_handler(void* arg)
 {
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-    xSemaphoreGiveFromISR(xBinarySemaphoreMpuInterrupt, &xHigherPriorityTaskWoken);
+    xSemaphoreGiveFromISR(xBinarySemaphoreGY271Interrupt, &xHigherPriorityTaskWoken);
     portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 
@@ -52,7 +52,7 @@ void brushed_motor_set_duty(float duty_cycle)
     }
 }
 
-void Engine::initEngine(){
+Engine::Engine(){
     ESP_ERROR_CHECK(mcpwm_gpio_init(MOTOR_CTRL_MCPWM_UNIT, MCPWM0A, GPIO_PWM0A_OUT));
     ESP_ERROR_CHECK(mcpwm_gpio_init(MOTOR_CTRL_MCPWM_UNIT, MCPWM0B, GPIO_PWM0B_OUT));
     mcpwm_config_t pwm_config;
@@ -62,11 +62,12 @@ void Engine::initEngine(){
     pwm_config.counter_mode = MCPWM_UP_COUNTER;         //up counting mode
     pwm_config.duty_mode = MCPWM_DUTY_MODE_0;
     ESP_ERROR_CHECK(mcpwm_init(MOTOR_CTRL_MCPWM_UNIT, MOTOR_CTRL_MCPWM_TIMER, &pwm_config));    //Configure PWM0A & PWM0B with above settings
+    setDuty(100);
 }
 
-void Engine::writeServo(int pos){
+void Engine::setDuty(float duty){
     // ESP_LOGI("writeServo", "Servo angle: %i", pos);
-    // brushed_motor_set_duty(100); 
+    brushed_motor_set_duty(duty); 
 }
 
 #define I2C_ADDRESS_GY271 0x1e
@@ -97,7 +98,7 @@ std::array<float, SENSOR_OUTPUT_DIM> Sensor::angles(){
     i2c_master_cmd_begin(I2C_NUM_0, cmd, 1000/portTICK_PERIOD_MS);
     i2c_cmd_link_delete(cmd);
 
-    short x = (data[0] << 8 | data[1]) - 475;
+    short x = (data[0] << 8 | data[1]) - 475 + 990;
     // short z = (data[2] << 8 | data[3]);
     // short y = data[4] << 8 | data[5];
     // int angle = atan2((double)z,(double)x) * (180 / 3.14159265) + 180; // angle in degrees
@@ -112,7 +113,7 @@ Solver solver;
 
 void task_display(void*){
 	while(1){
-        xSemaphoreTake(xBinarySemaphoreMpuInterrupt, portMAX_DELAY);
+        xSemaphoreTake(xBinarySemaphoreGY271Interrupt, portMAX_DELAY);
         // int64_t time_since_boot = esp_timer_get_time();
         // ESP_LOGI("Sensor changed", "One-shot timer called, time since boot: %lld us", time_since_boot);
         solver.changeEngineAcc();
@@ -120,47 +121,8 @@ void task_display(void*){
 	vTaskDelete(NULL);
 }
 
-esp_timer_handle_t oneshot_timer;
-
-static void oneshot_timer_callback(void* arg)
-{
-    // int64_t time_since_boot = esp_timer_get_time();
-    // ESP_LOGI("oneshot_timer_callback", "One-shot timer called, time since boot: %lld us", time_since_boot);
-    // ESP_ERROR_CHECK(esp_timer_start_once(oneshot_timer, 1000000));
-    // time_since_boot = esp_timer_get_time();
-    // ESP_LOGI(TAG, "Restarted periodic timer with 1s period, time since boot: %lld us",
-    //         time_since_boot);
-    // ESP_LOGI(TAG, "Starting moveEngine");
-    solver.moveEngine();
-}
-
 int64_t getTime(){
     return esp_timer_get_time();
-}
-
-void DynamicWithTimer::setTimerPeriod(float timerPeriod){
-    if (timerPeriod != FLT_MAX)
-    {
-        // ESP_LOGI("setTimerPeriod", "Started setTimerPeriod: %f", timerPeriod);
-        ESP_ERROR_CHECK(esp_timer_start_once(oneshot_timer, timerPeriod * 1000000));
-    }
-}
-
-void DynamicWithTimer::stopTimer(){
-    // ESP_LOGI(TAG, "Started stopTimer");
-    if (esp_timer_is_active(oneshot_timer))
-        // ESP_LOGI(TAG, "Stopping Timer");
-        esp_timer_stop(oneshot_timer);
-}
-
-void DynamicWithTimer::initTimer(){
-    // ESP_LOGI(TAG, "Started initTimer: ");
-    const esp_timer_create_args_t oneshot_timer_args = {
-            .callback = &oneshot_timer_callback,
-            .name = "one-shot"
-    };
-    ESP_ERROR_CHECK(esp_timer_create(&oneshot_timer_args, &oneshot_timer));
-    _prevTime = getTime();
 }
 
 #define PIN_SDA_AS5600 32
@@ -168,7 +130,7 @@ void DynamicWithTimer::initTimer(){
 #define AS5600_SLAVE_ADDR 0x36
 #define AS5600_ANGLE_REGISTER_H 0x0E
 
-IRAM_ATTR static uint16_t read_angle_AS5600() 
+IRAM_ATTR static int16_t read_angle_AS5600() 
 {
     uint8_t write_buffer = AS5600_ANGLE_REGISTER_H;
     uint8_t read_buffer[2] = {0,0};
@@ -190,11 +152,13 @@ IRAM_ATTR static uint16_t read_angle_AS5600()
     raw <<= 8;
     raw |= read_buffer[1];
 
-    // if(raw > AS5600_PULSES_PER_REVOLUTION - 1) {
-    //     raw = AS5600_PULSES_PER_REVOLUTION - 1 ;
-    // }
+    return (raw - 1411 + 2048) % 4096 - 2048;
+}
 
-    return raw;
+std::array<float, SENSOR_OUTPUT_DIM> Engine::angles()
+{
+    float x = read_angle_AS5600();
+    return std::array<float, SENSOR_OUTPUT_DIM>{(float)x};
 }
 
 void init_i2c()
@@ -250,12 +214,12 @@ void init_i2c()
     conf.clk_flags = 0;
 	ESP_ERROR_CHECK(i2c_param_config(I2C_NUM_1, &conf));
 	ESP_ERROR_CHECK(i2c_driver_install(I2C_NUM_1, I2C_MODE_MASTER, 0, 0, 0));
-    i2c_filter_enable(I2C_NUM_1, 7);
+    ESP_ERROR_CHECK(i2c_filter_enable(I2C_NUM_1, 7));
 }
 
 void app_main(void)
 {
-    brushed_motor_set_duty(100); 
+    // brushed_motor_set_duty(100); 
     // ESP_LOGI("initEngine", "Starting the engine");
     // usleep(10000000);
     // ESP_LOGI("initEngine", "Stopping the engine");
@@ -294,21 +258,21 @@ void app_main(void)
     // }
 
     init_i2c();
-    while (true)
-    {
-        auto r = read_angle_AS5600();
-        std::cout << r << "\n";
-        usleep(100000);
-    }
+    // while (true)
+    // {
+    //     auto r = read_angle_AS5600();
+    //     std::cout << r << "\n";
+    //     usleep(100000);
+    // }
     gpio_config_t io_conf = {};
     io_conf.intr_type = GPIO_INTR_POSEDGE;
     io_conf.pin_bit_mask = 1ULL<<GPIO_GY271_INTERRUPT;
     io_conf.mode = GPIO_MODE_INPUT;
     io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
-    gpio_config(&io_conf);
-    gpio_set_intr_type(GPIO_GY271_INTERRUPT, GPIO_INTR_NEGEDGE);
-    gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
-    gpio_isr_handler_add(GPIO_GY271_INTERRUPT, gy271_isr_handler, (void*) GPIO_GY271_INTERRUPT);
+    ESP_ERROR_CHECK(gpio_config(&io_conf));
+    ESP_ERROR_CHECK(gpio_set_intr_type(GPIO_GY271_INTERRUPT, GPIO_INTR_NEGEDGE));
+    ESP_ERROR_CHECK(gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT));
+    ESP_ERROR_CHECK(gpio_isr_handler_add(GPIO_GY271_INTERRUPT, gy271_isr_handler, (void*) GPIO_GY271_INTERRUPT));
     vTaskDelay(500/portTICK_PERIOD_MS);
     // solver.test();
     xTaskCreatePinnedToCore(&task_display, "disp_task", 8192, NULL, tskIDLE_PRIORITY, NULL, 0);
