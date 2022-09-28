@@ -73,7 +73,10 @@ class Sensor
     long long __prevTime = 0;
     int64_t _prevTime = 0;
     KalmanFilter kf[SENSOR_OUTPUT_DIM];
+    bool _useKalman = false;
 public:
+    Sensor() : _useKalman(true){}
+    Sensor(bool useKalman) : _useKalman(useKalman){}
     Dynamics observations[SENSOR_OUTPUT_DIM];
     virtual std::array<float, SENSOR_OUTPUT_DIM> angles();
     float update()
@@ -95,7 +98,8 @@ public:
                     __prevTime = t2;
                 }
                 // printf("pos: %2.0f \n", pos);
-                // pos = kf[i].get_pos(pos, dt);
+                if (_useKalman)
+                    pos = kf[i].get_pos(pos, dt);
                 // printf("pos: %2.0f\n", pos);
                 auto newVelocity = (pos - obs.pos) * rev_dt;
                 obs.acc = (newVelocity - obs.velocity) * rev_dt;
