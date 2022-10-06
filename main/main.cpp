@@ -11,7 +11,6 @@
 
 #define PIN_SDA_GY271 21
 #define PIN_CLK_GY271 22
-
 #define GPIO_GY271_INTERRUPT GPIO_NUM_36
 #define ESP_INTR_FLAG_DEFAULT 0
 
@@ -98,11 +97,11 @@ std::array<float, SENSOR_OUTPUT_DIM> Sensor::angles(){
     i2c_master_cmd_begin(I2C_NUM_0, cmd, 1000/portTICK_PERIOD_MS);
     i2c_cmd_link_delete(cmd);
 
-    short x = (data[0] << 8 | data[1]) - 475 + 990;
+    short x = (data[0] << 8 | data[1]) - 475 + 990 - 963;
     // short z = (data[2] << 8 | data[3]);
     // short y = data[4] << 8 | data[5];
     // int angle = atan2((double)z,(double)x) * (180 / 3.14159265) + 180; // angle in degrees
-    // ESP_LOGI("angles", "x: %d, y: %d, z: %d", x, y, z);
+    // ESP_LOGI("angles", "x: %d", x);
     // vTaskDelay(1000/portTICK_PERIOD_MS);
 
     xSemaphoreGive(xMutexMpu);
@@ -152,7 +151,8 @@ IRAM_ATTR static int16_t read_angle_AS5600()
     raw <<= 8;
     raw |= read_buffer[1];
 
-    return (raw - 1411 + 2048) % 4096 - 2048;
+    return (raw - 1411 + 160) % 4096 - 2048;
+    // return raw - 1411 + 2048;
 }
 
 std::array<float, SENSOR_OUTPUT_DIM> Engine::angles()
@@ -169,7 +169,7 @@ void init_i2c()
 	conf.scl_io_num = (gpio_num_t)PIN_CLK_GY271;
 	conf.sda_pullup_en = GPIO_PULLUP_ENABLE;
 	conf.scl_pullup_en = GPIO_PULLUP_ENABLE;
-	conf.master.clk_speed = 400000;
+	conf.master.clk_speed = 1000000;
     conf.clk_flags = 0;
 	ESP_ERROR_CHECK(i2c_param_config(I2C_NUM_0, &conf));
 	ESP_ERROR_CHECK(i2c_driver_install(I2C_NUM_0, I2C_MODE_MASTER, 0, 0, 0));
@@ -219,51 +219,31 @@ void init_i2c()
 
 void app_main(void)
 {
-    // brushed_motor_set_duty(100); 
     // ESP_LOGI("initEngine", "Starting the engine");
     // usleep(10000000);
     // ESP_LOGI("initEngine", "Stopping the engine");
     // usleep(10000000);
-    // ESP_ERROR_CHECK(iot_servo_write_angle(LEDC_LOW_SPEED_MODE, 0, 90)); usleep(50000000);
-    // Eigen::PartialPivLU<Matrix<MAT_SIZE, MAT_SIZE>> _partialSolver;
-    // Matrix<MAT_SIZE, MAT_SIZE> _observations = Matrix<MAT_SIZE, MAT_SIZE>::Random();
-    // _partialSolver.compute(_observations);
-    // for (int i = 0; i < 1000; i++)
-    // {
-    //     std::cout << i << "\n";
-    //     Vector<MAT_SIZE> sensData = Vector<MAT_SIZE>::Random();
-    //     auto ratios = _partialSolver.solve(sensData);
-    // }
-
-    // ESP_LOGI(TAG, "Started app_main");
-    // while (true)
-    // {
-    //     ESP_ERROR_CHECK(iot_servo_write_angle(LEDC_LOW_SPEED_MODE, 0, 0)); usleep(5000000);
-    //     ESP_ERROR_CHECK(iot_servo_write_angle(LEDC_LOW_SPEED_MODE, 0, 90)); usleep(5000000);
-    //     ESP_ERROR_CHECK(iot_servo_write_angle(LEDC_LOW_SPEED_MODE, 0, 180)); usleep(5000000);
-    //     ESP_ERROR_CHECK(iot_servo_write_angle(LEDC_LOW_SPEED_MODE, 0, 90)); usleep(5000000);
-    // }
-
-    // for(int posDegrees = 0; posDegrees <= 180; posDegrees++) {
-    //     printf("angle: %i\n", posDegrees);
-    //     ESP_ERROR_CHECK(iot_servo_write_angle(LEDC_LOW_SPEED_MODE, 0, posDegrees));
-    //     usleep(20000);
-    // }
-
-    // solver.initEngineTimer();
-    
-    // for (auto &a: {1, -1}){
-    //     engine.setAcc(a);
-    //     usleep(20000);
-    // }
 
     init_i2c();
+
+    // int del = 3000;
+    // int div = 1000000 / del / 2;
+    // float duty = 100;
+    // brushed_motor_set_duty(duty); 
+    // // for (int i = 0; i < 10000000 / del; i++)
     // while (true)
     // {
+    //     // if (i % div == 0) 
+    //     // {
+    //     //     if (duty > 0) duty = -100;
+    //     //     else duty = 100;
+    //     //     brushed_motor_set_duty(duty); 
+    //     // }
     //     auto r = read_angle_AS5600();
-    //     std::cout << r << "\n";
-    //     usleep(100000);
+    //     std::cout << r << " " << duty << "\n";
+    //     usleep(del);
     // }
+
     gpio_config_t io_conf = {};
     io_conf.intr_type = GPIO_INTR_POSEDGE;
     io_conf.pin_bit_mask = 1ULL<<GPIO_GY271_INTERRUPT;

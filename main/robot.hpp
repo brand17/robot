@@ -235,7 +235,7 @@ public:
     Solver()
     {
         // printf("Solver constructor called\n");
-        _sensor = Sensor();
+        _sensor = Sensor(false);
         _engine = Engine();
     }
 
