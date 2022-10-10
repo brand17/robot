@@ -224,6 +224,12 @@ void app_main(void)
 
     // int del = 3000;
     // int div = 1000000 / del / 2;
+    // for (float d = 30; d > 0; d--)
+    // {
+    //     brushed_motor_set_duty(d); 
+    //     std::cout << d << "\n";
+    //     usleep(1000000);
+    // }
     // float duty = 100;
     // brushed_motor_set_duty(duty); 
     // for (int i = 0; i < 10000000 / del; i++)

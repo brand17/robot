@@ -5,6 +5,7 @@
 #define constrain(amt, low, high) ((amt) < (low) ? (low) : ((amt) > (high) ? (high) : (amt)))
 #endif
 #define SENSOR_OUTPUT_DIM 1
+#define MIN_ENGINE_PWM 30
 
 template <typename T>
 int sgn(T val)
@@ -254,7 +255,7 @@ public:
         auto eng_cos = sqrtf(1 - engObs->pos * engObs->pos);
         // if (eng_cos == 0 or isnan(eng_cos)) 
             // std::cout  << "eng_cos is " << eng_cos << " " << engObs->pos << "\n";
-        obs[0] = _duty * eng_cos;
+        obs[0] = (_duty - MIN_ENGINE_PWM) * eng_cos;
         if (isZero(obs))
             return;
         float newAcc = NAN;
@@ -302,7 +303,7 @@ public:
         _observations.row(MAT_SIZE - 1) = obs.transpose();
         if (!isnan(newAcc))
         {
-            _duty = constrain(newAcc / eng_cos, -100, 100);
+            _duty = constrain((newAcc + MIN_ENGINE_PWM) / eng_cos, -100, 100);
             // std::cout << obs.transpose().format(_HeavyFmt) << " " << newAcc << " " << _duty << " " << eng_cos;// << "\n";
             // std::cout << ratios.transpose().format(_HeavyFmt);
             _engine.setDuty(_duty); // printf("height=%i acc=%f\n", _height, newAcc);
