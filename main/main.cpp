@@ -37,13 +37,11 @@ void IRAM_ATTR gy271_isr_handler(void* arg)
 
 void brushed_motor_set_duty(float duty_cycle)
 {
-    /* motor moves in forward direction, with duty cycle = duty % */
     if (duty_cycle > 0) {
         mcpwm_set_signal_low(MOTOR_CTRL_MCPWM_UNIT, MOTOR_CTRL_MCPWM_TIMER, MCPWM_OPR_A);
         mcpwm_set_duty(MOTOR_CTRL_MCPWM_UNIT, MOTOR_CTRL_MCPWM_TIMER, MCPWM_OPR_B, duty_cycle);
         mcpwm_set_duty_type(MOTOR_CTRL_MCPWM_UNIT, MOTOR_CTRL_MCPWM_TIMER, MCPWM_OPR_B, MCPWM_DUTY_MODE_0);  //call this each time, if operator was previously in low/high state
     }
-    /* motor moves in backward direction, with duty cycle = -duty % */
     else {
         mcpwm_set_signal_low(MOTOR_CTRL_MCPWM_UNIT, MOTOR_CTRL_MCPWM_TIMER, MCPWM_OPR_B);
         mcpwm_set_duty(MOTOR_CTRL_MCPWM_UNIT, MOTOR_CTRL_MCPWM_TIMER, MCPWM_OPR_A, -duty_cycle);
@@ -70,7 +68,6 @@ void Engine::setDuty(float duty){
 }
 
 #define I2C_ADDRESS_GY271 0x1e
-// static char tag[] = "hmc5883l";
 
 std::array<float, SENSOR_OUTPUT_DIM> Sensor::angles(){
     xSemaphoreTake(xMutexMpu, portMAX_DELAY);
@@ -129,7 +126,7 @@ int64_t getTime(){
 #define AS5600_SLAVE_ADDR 0x36
 #define AS5600_ANGLE_REGISTER_H 0x0E
 
-IRAM_ATTR static int16_t read_angle_AS5600() 
+IRAM_ATTR static float read_angle_AS5600() 
 {
     uint8_t write_buffer = AS5600_ANGLE_REGISTER_H;
     uint8_t read_buffer[2] = {0,0};
@@ -151,8 +148,12 @@ IRAM_ATTR static int16_t read_angle_AS5600()
     raw <<= 8;
     raw |= read_buffer[1];
 
-    return (raw - 1411 + 160) % 4096 - 2048;
-    // return raw - 1411 + 2048;
+    float a = float((raw + 4096 + 2048 - 3338) % 4096 - 2048); 
+    a /= 2048; 
+    a *= M_PI; 
+    a = sinf(a); 
+    // std::cout << a << " ";
+    return a;
 }
 
 std::array<float, SENSOR_OUTPUT_DIM> Engine::angles()
@@ -219,26 +220,21 @@ void init_i2c()
 
 void app_main(void)
 {
-    // ESP_LOGI("initEngine", "Starting the engine");
-    // usleep(10000000);
-    // ESP_LOGI("initEngine", "Stopping the engine");
-    // usleep(10000000);
-
     init_i2c();
 
     // int del = 3000;
     // int div = 1000000 / del / 2;
     // float duty = 100;
     // brushed_motor_set_duty(duty); 
-    // // for (int i = 0; i < 10000000 / del; i++)
-    // while (true)
+    // for (int i = 0; i < 10000000 / del; i++)
+    // // while (true)
     // {
-    //     // if (i % div == 0) 
-    //     // {
-    //     //     if (duty > 0) duty = -100;
-    //     //     else duty = 100;
-    //     //     brushed_motor_set_duty(duty); 
-    //     // }
+    //     if (i % div == 0) 
+    //     {
+    //         if (duty > 0) duty = -100;
+    //         else duty = 100;
+    //         brushed_motor_set_duty(duty); 
+    //     }
     //     auto r = read_angle_AS5600();
     //     std::cout << r << " " << duty << "\n";
     //     usleep(del);

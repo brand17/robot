@@ -75,7 +75,7 @@ class Sensor
     KalmanFilter kf[SENSOR_OUTPUT_DIM];
     bool _useKalman = false;
 public:
-    Sensor() : _useKalman(true){}
+    Sensor(){}
     Sensor(bool useKalman) : _useKalman(useKalman){}
     Dynamics observations[SENSOR_OUTPUT_DIM];
     virtual std::array<float, SENSOR_OUTPUT_DIM> angles();
@@ -113,7 +113,6 @@ public:
             for (int i = 0; i < SENSOR_OUTPUT_DIM; i++)
             {
                 observations[i].pos = angs[i];
-                // newPos = 1000;
             }
         }
         _prevTime = t;
@@ -194,7 +193,6 @@ class Solver
     int _replacedIndex(Vector<MAT_SIZE> &obs)
     {
         Eigen::Matrix<float, MAT_SIZE, MAT_SIZE + 1, Eigen::RowMajor> rowReduce;
-        // Matrix<MAT_SIZE, MAT_SIZE + 1> rowReduce; 
         rowReduce << _observations.transpose(), obs;
         auto subMatSize = std::min(MAT_SIZE, _height + 1);
         for (int i = 0; i < subMatSize; i++)
@@ -234,9 +232,8 @@ class Solver
 public:
     Solver()
     {
-        // printf("Solver constructor called\n");
-        _sensor = Sensor(false);
-        _engine = Engine();
+        _sensor = Sensor(true);
+        // _engine = Engine();
     }
 
     void changeEngineAcc()
@@ -245,11 +242,7 @@ public:
         auto e = _engine.update();
         if (s == 1000000 or e == 1000000) 
             return;
-        // Vector<MAT_SIZE> obs = {_engine.getAcc(), _sensor.getAcc(), _sensor.getVelocity(), 
-        //                         _sensor.getPos(), _engine.getVelocity(), _engine.getPos()};
-        // auto t = getTime();
         Vector<MAT_SIZE> obs; 
-        obs[0] = _duty;
         int i = 1;
         for (auto &&o: _sensor.observations)
         {
@@ -258,11 +251,14 @@ public:
         }
         auto engObs = &_engine.observations[0];
         obs.tail<3>() << engObs->pos, engObs->velocity, engObs->acc;
+        auto eng_cos = sqrtf(1 - engObs->pos * engObs->pos);
+        // if (eng_cos == 0 or isnan(eng_cos)) 
+            // std::cout  << "eng_cos is " << eng_cos << " " << engObs->pos << "\n";
+        obs[0] = _duty * eng_cos;
         if (isZero(obs))
             return;
         float newAcc = NAN;
         int ri;
-        // std::cout << _height << '\n';
         if (_height == MAT_SIZE)
         {
             _partialSolver.compute(_observations);
@@ -276,15 +272,6 @@ public:
             Vector<3 * SENSOR_OUTPUT_DIM> b; b.noalias() = ratios.transpose().rightCols(l) * obs.tail(l);
             Vector<3 * SENSOR_OUTPUT_DIM> a = ratios.row(0);
             newAcc = - b.dot(a) / a.dot(a);
-            // std::cout << ratios.transpose().format(_HeavyFmt);
-            std::cout << obs.transpose().format(_HeavyFmt) << " " << newAcc;// << "\n";
-            // counter ++;
-            // // std::cout << counter << "\n";
-            // if (counter == 100){
-            //     std::cout << _observations << "\n"
-            //               << obs.transpose() << "\n"
-            //               << newAcc << "\n";
-            // }
         }
         else
         {
@@ -292,50 +279,38 @@ public:
             {
                 auto ind = _getBasisIndices(); // basis indices
                 auto obsBasis = _observations.bottomRows(_height)(Eigen::all, ind);
-                // auto m = Matrix<2, 2>({{1, 2, 3}, {3, 4}});
-                // auto obsBasis = m(Eigen::all, std::vector<int>({0, 1}));
-                // std::cout << obsBasis.rows() << obsBasis.cols() << _height << "\n";
                 auto dynSolver = obsBasis.partialPivLu();
-                // if (_fullSolver.rank() < 2)
-                //     return;
                 Eigen::Matrix<float, Eigen::Dynamic, 3 * SENSOR_OUTPUT_DIM, 0, MAT_SIZE> ratios(_height, 3 * SENSOR_OUTPUT_DIM);
                 for (int i = 0; i < 3 * SENSOR_OUTPUT_DIM; i++)
                 {
                     auto sensData = _nextObservations(obs, i + 1).bottomRows(_height);
-                    // Vector<3> s {1, 1, 1};
-                    // auto sensData = s.bottomRows(_height);
                     ratios.col(i) = dynSolver.solve(sensData);
                 }
                 int l = _height - 1;
                 Vector<3 * SENSOR_OUTPUT_DIM> b; b.noalias() = ratios.transpose().rightCols(l) * obs(ind).tail(l);
                 Vector<3 * SENSOR_OUTPUT_DIM> a = ratios.row(0);
                 newAcc = - b.dot(a) / a.dot(a);
-                // std::cout << ratios.transpose().format(_HeavyFmt);
-                std::cout << obs.transpose().format(_HeavyFmt) << " " << newAcc;// << "\n";
-                // ri = _replacedIndex(obs);
             }
-            // else
-            //     ri = _replacedIndex(obs);
         }
         ri = _replacedIndex(obs);
-        // if (_height < MAT_SIZE && ri < MAT_SIZE - _height && _height == 7)
-        //     ri = _replacedIndex(obs);
         if (_height < MAT_SIZE && ri < MAT_SIZE - _height)
             _height++;
-        // std::cout << ri << " ";
-        // if (_height == 8)
-        //     std::cout << _observations << "\n";
         for (int i = ri; i < MAT_SIZE - 1; i++)
         {
             _observations.row(i) = _observations.row(i + 1);
         }
         _observations.row(MAT_SIZE - 1) = obs.transpose();
-        // if (_height == 8)
-        //     std::cout << _observations << "\n";
         if (!isnan(newAcc))
         {
-            _duty = constrain(newAcc, -100, 100);
+            _duty = constrain(newAcc / eng_cos, -100, 100);
+            // std::cout << obs.transpose().format(_HeavyFmt) << " " << newAcc << " " << _duty << " " << eng_cos;// << "\n";
+            // std::cout << ratios.transpose().format(_HeavyFmt);
             _engine.setDuty(_duty); // printf("height=%i acc=%f\n", _height, newAcc);
+        }
+        else 
+        {
+            std::cout  << " newAcc is Nan!!!\n";
+            _engine.setDuty(0);
         }
         // std::cout << getTime() - t << " ";
     }
