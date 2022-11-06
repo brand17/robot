@@ -135,5 +135,6 @@
     "idf.openOcdConfigs": [
         "interface/ftdi/esp32_devkitj_v1.cfg",
         "target/esp32.cfg"
-    ]
+    ],
+    "python.pythonPath": "C:\\Users\\FA.PROJECTOR-MSK\\AppData\\Local\\Programs\\Python\\Python310\\python.exe"
 }

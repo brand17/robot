@@ -11,24 +11,24 @@
 
 #define PIN_SDA_GY271 21
 #define PIN_CLK_GY271 22
-#define GPIO_GY271_INTERRUPT GPIO_NUM_36
+// #define GPIO_GY271_INTERRUPT GPIO_NUM_36
 #define ESP_INTR_FLAG_DEFAULT 0
 
 #include <iostream>
 
-SemaphoreHandle_t xBinarySemaphoreGY271Interrupt = xSemaphoreCreateBinary();
+// SemaphoreHandle_t xBinarySemaphoreGY271Interrupt = xSemaphoreCreateBinary();
 SemaphoreHandle_t xMutexMpu = xSemaphoreCreateMutex();
  
 extern "C" {
 	void app_main(void);
 }
 
-void IRAM_ATTR gy271_isr_handler(void* arg)
-{
-    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-    xSemaphoreGiveFromISR(xBinarySemaphoreGY271Interrupt, &xHigherPriorityTaskWoken);
-    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
-}
+// void IRAM_ATTR gy271_isr_handler(void* arg)
+// {
+//     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+//     xSemaphoreGiveFromISR(xBinarySemaphoreGY271Interrupt, &xHigherPriorityTaskWoken);
+//     portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+// }
 
 #define MOTOR_CTRL_MCPWM_UNIT   MCPWM_UNIT_0
 #define MOTOR_CTRL_MCPWM_TIMER  MCPWM_TIMER_0
@@ -69,31 +69,48 @@ void Engine::setDuty(float duty){
 
 #define I2C_ADDRESS_GY271 0x1e
 
-std::array<float, SENSOR_OUTPUT_DIM> Sensor::angles(){
-    xSemaphoreTake(xMutexMpu, portMAX_DELAY);
-    // printf("core is %i ", xPortGetCoreID());
-	uint8_t data[6];
+void write_GY271_register(const uint8_t reg, const uint8_t data){
     i2c_cmd_handle_t cmd = i2c_cmd_link_create();
-    i2c_master_start(cmd);
-    i2c_master_write_byte(cmd, (I2C_ADDRESS_GY271 << 1) | I2C_MASTER_WRITE, 1);
-    i2c_master_write_byte(cmd, 0x03, 1); // Data registers
-    i2c_master_stop(cmd);
-    i2c_master_cmd_begin(I2C_NUM_0, cmd, 1000/portTICK_PERIOD_MS);
+    ESP_ERROR_CHECK(i2c_master_start(cmd));
+    ESP_ERROR_CHECK(i2c_master_write_byte(cmd, (I2C_ADDRESS_GY271 << 1) | I2C_MASTER_WRITE, 1));
+    ESP_ERROR_CHECK(i2c_master_write_byte(cmd, reg, 1)); // Data registers
+    ESP_ERROR_CHECK(i2c_master_write_byte(cmd, data, 1)); 
+    ESP_ERROR_CHECK(i2c_master_stop(cmd));
+    ESP_ERROR_CHECK(i2c_master_cmd_begin(I2C_NUM_0, cmd, 1000/portTICK_PERIOD_MS));
+    i2c_cmd_link_delete(cmd);
+}
+
+void read_GY271_registers(const uint8_t reg, uint8_t* data, const uint8_t bytes){
+    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+    ESP_ERROR_CHECK(i2c_master_start(cmd));
+    ESP_ERROR_CHECK(i2c_master_write_byte(cmd, (I2C_ADDRESS_GY271 << 1) | I2C_MASTER_WRITE, 1));
+    ESP_ERROR_CHECK(i2c_master_write_byte(cmd, reg, 1)); // Data registers
+    ESP_ERROR_CHECK(i2c_master_stop(cmd));
+    ESP_ERROR_CHECK(i2c_master_cmd_begin(I2C_NUM_0, cmd, 1000/portTICK_PERIOD_MS));
     i2c_cmd_link_delete(cmd);
 
     cmd = i2c_cmd_link_create();
-    i2c_master_start(cmd);
-    i2c_master_write_byte(cmd, (I2C_ADDRESS_GY271 << 1) | I2C_MASTER_READ, 1);
-    i2c_master_read_byte(cmd, data,   (i2c_ack_type_t) 0);
-    i2c_master_read_byte(cmd, data+1, (i2c_ack_type_t) 0);
-    i2c_master_read_byte(cmd, data+2, (i2c_ack_type_t) 0);
-    i2c_master_read_byte(cmd, data+3, (i2c_ack_type_t) 0);
-    i2c_master_read_byte(cmd, data+4, (i2c_ack_type_t) 0);
-    i2c_master_read_byte(cmd, data+5, (i2c_ack_type_t) 1);
-    i2c_master_stop(cmd);
-    i2c_master_cmd_begin(I2C_NUM_0, cmd, 1000/portTICK_PERIOD_MS);
+    ESP_ERROR_CHECK(i2c_master_start(cmd));
+    ESP_ERROR_CHECK(i2c_master_write_byte(cmd, (I2C_ADDRESS_GY271 << 1) | I2C_MASTER_READ, 1));
+    // ESP_ERROR_CHECK(i2c_master_read(cmd, data, bytes, (i2c_ack_type_t) 1));
+    for (uint8_t i = 0; i < bytes - 1; i++)
+        ESP_ERROR_CHECK(i2c_master_read_byte(cmd, data + i, (i2c_ack_type_t) 0));
+    ESP_ERROR_CHECK(i2c_master_read_byte(cmd, data + bytes - 1, (i2c_ack_type_t) 1));
+    ESP_ERROR_CHECK(i2c_master_stop(cmd));
+    ESP_ERROR_CHECK(i2c_master_cmd_begin(I2C_NUM_0, cmd, 1000/portTICK_PERIOD_MS));
     i2c_cmd_link_delete(cmd);
+}
 
+Multisample msf = Multisample(16);
+
+std::array<float, SENSOR_OUTPUT_DIM> angles_GY271(){
+    // printf("core is %i ", xPortGetCoreID());
+	uint8_t data[6];
+    write_GY271_register(2, 1); // single measurement mode
+    // uint8_t status[1];
+    // read_GY271_registers(9, status, 1);
+    // std::cout << int(status[0]) << "\n";
+    read_GY271_registers(3, data, 6);
     short x = (data[0] << 8 | data[1]) - 475 + 990 - 963;
     // short z = (data[2] << 8 | data[3]);
     // short y = data[4] << 8 | data[5];
@@ -101,15 +118,22 @@ std::array<float, SENSOR_OUTPUT_DIM> Sensor::angles(){
     // ESP_LOGI("angles", "x: %d", x);
     // vTaskDelay(1000/portTICK_PERIOD_MS);
 
+    return std::array<float, SENSOR_OUTPUT_DIM>{msf.get(x)};
+}
+
+std::array<float, SENSOR_OUTPUT_DIM> Sensor::angles(){
+    xSemaphoreTake(xMutexMpu, portMAX_DELAY);
+    auto x = angles_GY271();
+    // std::cout << getTime() << "\n";
     xSemaphoreGive(xMutexMpu);
-    return std::array<float, SENSOR_OUTPUT_DIM>{(float)x};
+    return x;
 }
 
 Solver solver;
 
 void task_display(void*){
 	while(1){
-        xSemaphoreTake(xBinarySemaphoreGY271Interrupt, portMAX_DELAY);
+        // xSemaphoreTake(xBinarySemaphoreGY271Interrupt, portMAX_DELAY);
         // int64_t time_since_boot = esp_timer_get_time();
         // ESP_LOGI("Sensor changed", "One-shot timer called, time since boot: %lld us", time_since_boot);
         solver.changeEngineAcc();
@@ -175,36 +199,10 @@ void init_i2c()
 	ESP_ERROR_CHECK(i2c_param_config(I2C_NUM_0, &conf));
 	ESP_ERROR_CHECK(i2c_driver_install(I2C_NUM_0, I2C_MODE_MASTER, 0, 0, 0));
 
-	i2c_cmd_handle_t cmd = i2c_cmd_link_create();
-	i2c_master_start(cmd);
-	i2c_master_write_byte(cmd, (I2C_ADDRESS_GY271 << 1) | I2C_MASTER_WRITE, 1);
-	i2c_master_write_byte(cmd, 0x02, 1); // Mode register
-	i2c_master_write_byte(cmd, 0x00, 1); // continuous mode 
-	i2c_master_stop(cmd);
-	i2c_master_cmd_begin(I2C_NUM_0, cmd, 1000/portTICK_PERIOD_MS);
-	i2c_cmd_link_delete(cmd);
+    // write_GY271_register(2, 0x00); // continuous mode 
+    // write_GY271_register(0, 0x54); // set 30Hz, oversampling 4
 
-	cmd = i2c_cmd_link_create();
-	i2c_master_start(cmd);
-	i2c_master_write_byte(cmd, (I2C_ADDRESS_GY271 << 1) | I2C_MASTER_WRITE, 1);
-	i2c_master_write_byte(cmd, 0x00, 1); // A register
-	// i2c_master_write_byte(cmd, 0x70, 1); // set 15Hz, oversampling 8
-	// i2c_master_write_byte(cmd, 0x34, 1); // set 30Hz, oversampling 2
-	i2c_master_write_byte(cmd, 0x54, 1); // set 30Hz, oversampling 4
-	// i2c_master_write_byte(cmd, 0x74, 1); // set 30Hz, oversampling 8
-	// i2c_master_write_byte(cmd, 0x18, 1); // set 75Hz, no oversampling (1)
-	i2c_master_stop(cmd);
-	i2c_master_cmd_begin(I2C_NUM_0, cmd, 1000/portTICK_PERIOD_MS);
-	i2c_cmd_link_delete(cmd);
-
-	cmd = i2c_cmd_link_create();
-	i2c_master_start(cmd);
-	i2c_master_write_byte(cmd, (I2C_ADDRESS_GY271 << 1) | I2C_MASTER_WRITE, 1);
-	i2c_master_write_byte(cmd, 0x01, 1); // B register
-	i2c_master_write_byte(cmd, 0x20, 1); // set gain
-	i2c_master_stop(cmd);
-	i2c_master_cmd_begin(I2C_NUM_0, cmd, 1000/portTICK_PERIOD_MS);
-	i2c_cmd_link_delete(cmd);
+    write_GY271_register(1, 0x20);
 
 	conf.mode = I2C_MODE_MASTER;
 	conf.sda_io_num = (gpio_num_t)PIN_SDA_AS5600;
@@ -233,29 +231,19 @@ void app_main(void)
     // float duty = 100;
     // brushed_motor_set_duty(duty); 
     // for (int i = 0; i < 10000000 / del; i++)
-    // // while (true)
+    // while (true)
     // {
-    //     if (i % div == 0) 
-    //     {
-    //         if (duty > 0) duty = -100;
-    //         else duty = 100;
-    //         brushed_motor_set_duty(duty); 
-    //     }
-    //     auto r = read_angle_AS5600();
-    //     std::cout << r << " " << duty << "\n";
+    //     // if (i % div == 0) 
+    //     // {
+    //     //     if (duty > 0) duty = -100;
+    //     //     else duty = 100;
+    //     //     brushed_motor_set_duty(duty); 
+    //     // }
+    //     auto r = angles_GY271();
+    //     std::cout << r[0] << " " << "\n";
     //     usleep(del);
     // }
 
-    gpio_config_t io_conf = {};
-    io_conf.intr_type = GPIO_INTR_POSEDGE;
-    io_conf.pin_bit_mask = 1ULL<<GPIO_GY271_INTERRUPT;
-    io_conf.mode = GPIO_MODE_INPUT;
-    io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
-    ESP_ERROR_CHECK(gpio_config(&io_conf));
-    ESP_ERROR_CHECK(gpio_set_intr_type(GPIO_GY271_INTERRUPT, GPIO_INTR_NEGEDGE));
-    ESP_ERROR_CHECK(gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT));
-    ESP_ERROR_CHECK(gpio_isr_handler_add(GPIO_GY271_INTERRUPT, gy271_isr_handler, (void*) GPIO_GY271_INTERRUPT));
-    vTaskDelay(500/portTICK_PERIOD_MS);
     // solver.test();
     xTaskCreatePinnedToCore(&task_display, "disp_task", 8192, NULL, tskIDLE_PRIORITY, NULL, 0);
     // xTaskCreatePinnedToCore(&task_display, "disp_task", 8192, NULL, tskIDLE_PRIORITY, NULL, 1);

@@ -1,6 +1,7 @@
 #include <iostream>
 #include <math.h>
 #include <array>
+#include <vector>
 #ifndef ARDUINO
 #define constrain(amt, low, high) ((amt) < (low) ? (low) : ((amt) > (high) ? (high) : (amt)))
 #endif
@@ -69,6 +70,37 @@ private:
     Eigen::Vector3f K, x_hat, x_hat_new;
 };
 
+class Multisample{
+    std::vector<float> measures;
+    uint8_t index = 0;
+    float total = 0;
+    uint8_t size = 0;
+    float multiplier = 0;
+public:
+    Multisample(uint8_t s){
+        size = s;
+        measures.reserve(size);
+        // std::fill(measures.begin(), measures.end(), 0);
+        multiplier = 1. / size;
+        std::cout << "multiplier: " << multiplier << "\n";
+    }
+    float get(float value){
+        if (measures.size() < size){
+            measures.push_back(value);
+            total += value;
+            return total / measures.size();
+        }
+        else{
+            total += value - measures[index];
+            measures[index] = value;
+            index ++;
+            if (index == measures.size())
+                index = 0;
+            return total * multiplier;
+        }
+    }
+};
+
 class Sensor
 {
     long long __prevTime = 0;
@@ -99,8 +131,10 @@ public:
                     __prevTime = t2;
                 }
                 // printf("pos: %2.0f \n", pos);
-                if (_useKalman)
+                if (_useKalman){
+                    // printf("using Kalman\n");
                     pos = kf[i].get_pos(pos, dt);
+                }
                 // printf("pos: %2.0f\n", pos);
                 auto newVelocity = (pos - obs.pos) * rev_dt;
                 obs.acc = (newVelocity - obs.velocity) * rev_dt;
@@ -233,7 +267,7 @@ class Solver
 public:
     Solver()
     {
-        _sensor = Sensor(true);
+        _sensor = Sensor();
         // _engine = Engine();
     }
 
@@ -304,7 +338,7 @@ public:
         if (!isnan(newAcc))
         {
             _duty = constrain((newAcc + MIN_ENGINE_PWM) / eng_cos, -100, 100);
-            // std::cout << obs.transpose().format(_HeavyFmt) << " " << newAcc << " " << _duty << " " << eng_cos;// << "\n";
+            std::cout << obs.transpose().format(_HeavyFmt) << " " << newAcc << " " << _duty << " " << eng_cos;// << "\n";
             // std::cout << ratios.transpose().format(_HeavyFmt);
             _engine.setDuty(_duty); // printf("height=%i acc=%f\n", _height, newAcc);
         }
