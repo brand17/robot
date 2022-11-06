@@ -5,7 +5,7 @@
 #ifndef ARDUINO
 #define constrain(amt, low, high) ((amt) < (low) ? (low) : ((amt) > (high) ? (high) : (amt)))
 #endif
-#define SENSOR_OUTPUT_DIM 1
+// #define SENSOR_OUTPUT_DIM 1
 #define MIN_ENGINE_PWM 30
 
 template <typename T>
@@ -103,37 +103,37 @@ public:
 
 class Sensor
 {
-    long long __prevTime = 0;
     int64_t _prevTime = 0;
-    KalmanFilter kf[SENSOR_OUTPUT_DIM];
+    KalmanFilter _kf;
+    uint8_t _sampleSize = 1;
     bool _useKalman = false;
+    uint8_t _counter = 0;
+    float _accum_angles = 0;
 public:
     Sensor(){}
-    Sensor(bool useKalman) : _useKalman(useKalman){}
-    Dynamics observations[SENSOR_OUTPUT_DIM];
-    virtual std::array<float, SENSOR_OUTPUT_DIM> angles();
+    Sensor(uint8_t sampleSize, bool useKalman) : _sampleSize(sampleSize), _useKalman(useKalman){}
+    Dynamics observations;
+    virtual float angle();
     float update()
     {
-        auto angs = angles();
-        auto t = getTime();
         float pos = 1000000;
-        if (_prevTime != 0)
-        {
-            auto dt = t - _prevTime;
-            auto rev_dt = 1000000.f / (dt);
-            for (int i = 0; i < SENSOR_OUTPUT_DIM; i++)
+        _accum_angles += angle();
+        _counter ++;
+        if (_counter == _sampleSize){
+            auto ang = _accum_angles / _sampleSize;
+            // std::cout << "ang=" << ang << "\n";
+            _counter = 0; _accum_angles = 0;
+            // auto ang = angle();
+            auto t = getTime();
+            if (_prevTime != 0)
             {
-                pos = angs[i]; auto &obs = observations[i];
-                auto t2 = t / 1000000;
-                if (t2 != __prevTime)
-                {
-                    // printf("%2.0f\n", pos);
-                    __prevTime = t2;
-                }
+                auto dt = t - _prevTime;
+                auto rev_dt = 1000000.f / (dt);
+                pos = ang; auto &obs = observations;
                 // printf("pos: %2.0f \n", pos);
                 if (_useKalman){
                     // printf("using Kalman\n");
-                    pos = kf[i].get_pos(pos, dt);
+                    pos = _kf.get_pos(pos, dt);
                 }
                 // printf("pos: %2.0f\n", pos);
                 auto newVelocity = (pos - obs.pos) * rev_dt;
@@ -142,15 +142,12 @@ public:
                 obs.pos = pos;
                 // printf("pos: %2.0f, velocity: %4.0f, acc: %6.0f\n", obs.pos, obs.velocity, obs.acc);
             }
-        }
-        else 
-        {
-            for (int i = 0; i < SENSOR_OUTPUT_DIM; i++)
+            else 
             {
-                observations[i].pos = angs[i];
+                observations.pos = ang;
             }
+            _prevTime = t;
         }
-        _prevTime = t;
         return pos;
     };
 };
@@ -162,7 +159,7 @@ class Engine : public Sensor
 public:
     Engine();
     void setDuty(float duty);
-    virtual std::array<float, SENSOR_OUTPUT_DIM> angles();
+    virtual float angle();
 };
 
 using Eigen::seq;
@@ -174,7 +171,7 @@ using Matrix = Eigen::Matrix<float, rowSize, colSize>;
 Eigen::IOFormat _HeavyFmt(Eigen::FullPrecision, Eigen::DontAlignCols, " ", "\n", "", "", "\n", "");
 
 #define ZERO_LIMIT 1e-3
-#define MAT_SIZE 3 + SENSOR_OUTPUT_DIM * 3 + 1
+#define MAT_SIZE 3 + 3 + 1
 
 bool isZero(Vector<MAT_SIZE> col){
     return (col.array() == 0).all();
@@ -267,7 +264,7 @@ class Solver
 public:
     Solver()
     {
-        _sensor = Sensor();
+        _sensor = Sensor(8, false);
         // _engine = Engine();
     }
 
@@ -278,13 +275,8 @@ public:
         if (s == 1000000 or e == 1000000) 
             return;
         Vector<MAT_SIZE> obs; 
-        int i = 1;
-        for (auto &&o: _sensor.observations)
-        {
-            obs.segment<3>(i) << o.pos, o.velocity, o.acc; 
-            i += 3;
-        }
-        auto engObs = &_engine.observations[0];
+        obs.segment<3>(1) << _sensor.observations.pos, _sensor.observations.velocity, _sensor.observations.acc; 
+        auto engObs = &_engine.observations;
         obs.tail<3>() << engObs->pos, engObs->velocity, engObs->acc;
         auto eng_cos = sqrtf(1 - engObs->pos * engObs->pos);
         // if (eng_cos == 0 or isnan(eng_cos)) 
@@ -297,15 +289,15 @@ public:
         if (_height == MAT_SIZE)
         {
             _partialSolver.compute(_observations);
-            Matrix<MAT_SIZE, 3 * SENSOR_OUTPUT_DIM> ratios;
-            for (int i = 0; i < 3 * SENSOR_OUTPUT_DIM; i++)
+            Matrix<MAT_SIZE, 3> ratios;
+            for (int i = 0; i < 3; i++)
             {
                 auto sensData = _nextObservations(obs, i + 1);
                 ratios.col(i) = _partialSolver.solve(sensData);
             }
             int l = MAT_SIZE - 1;
-            Vector<3 * SENSOR_OUTPUT_DIM> b; b.noalias() = ratios.transpose().rightCols(l) * obs.tail(l);
-            Vector<3 * SENSOR_OUTPUT_DIM> a = ratios.row(0);
+            Vector<3> b; b.noalias() = ratios.transpose().rightCols(l) * obs.tail(l);
+            Vector<3> a = ratios.row(0);
             newAcc = - b.dot(a) / a.dot(a);
         }
         else
@@ -315,15 +307,15 @@ public:
                 auto ind = _getBasisIndices(); // basis indices
                 auto obsBasis = _observations.bottomRows(_height)(Eigen::all, ind);
                 auto dynSolver = obsBasis.partialPivLu();
-                Eigen::Matrix<float, Eigen::Dynamic, 3 * SENSOR_OUTPUT_DIM, 0, MAT_SIZE> ratios(_height, 3 * SENSOR_OUTPUT_DIM);
-                for (int i = 0; i < 3 * SENSOR_OUTPUT_DIM; i++)
+                Eigen::Matrix<float, Eigen::Dynamic, 3, 0, MAT_SIZE> ratios(_height, 3);
+                for (int i = 0; i < 3; i++)
                 {
                     auto sensData = _nextObservations(obs, i + 1).bottomRows(_height);
                     ratios.col(i) = dynSolver.solve(sensData);
                 }
                 int l = _height - 1;
-                Vector<3 * SENSOR_OUTPUT_DIM> b; b.noalias() = ratios.transpose().rightCols(l) * obs(ind).tail(l);
-                Vector<3 * SENSOR_OUTPUT_DIM> a = ratios.row(0);
+                Vector<3> b; b.noalias() = ratios.transpose().rightCols(l) * obs(ind).tail(l);
+                Vector<3> a = ratios.row(0);
                 newAcc = - b.dot(a) / a.dot(a);
             }
         }
