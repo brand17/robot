@@ -69,7 +69,7 @@ void Engine::setDuty(float duty){
 
 #define I2C_ADDRESS_GEO 0x1e
 
-void write_GY271_register(const uint8_t reg, const uint8_t data){
+void write_i2c_register(const uint8_t reg, const uint8_t data){
     i2c_cmd_handle_t cmd = i2c_cmd_link_create();
     ESP_ERROR_CHECK(i2c_master_start(cmd));
     ESP_ERROR_CHECK(i2c_master_write_byte(cmd, (I2C_ADDRESS_GEO << 1) | I2C_MASTER_WRITE, 1));
@@ -82,7 +82,7 @@ void write_GY271_register(const uint8_t reg, const uint8_t data){
     i2c_cmd_link_delete(cmd);
 }
 
-void read_GY271_registers(const uint8_t reg, uint8_t* data, const uint8_t bytes){
+void read_i2c_registers(const uint8_t reg, uint8_t* data, const uint8_t bytes){
     i2c_cmd_handle_t cmd = i2c_cmd_link_create();
     ESP_ERROR_CHECK(i2c_master_start(cmd));
     ESP_ERROR_CHECK(i2c_master_write_byte(cmd, (I2C_ADDRESS_GEO << 1) | I2C_MASTER_WRITE, 1));
@@ -103,11 +103,11 @@ void read_GY271_registers(const uint8_t reg, uint8_t* data, const uint8_t bytes)
 float angles_GY271(){
     // printf("core is %i ", xPortGetCoreID());
 	uint8_t data[6];
-    write_GY271_register(2, 1); // single measurement mode
+    write_i2c_register(2, 1); // single measurement mode
     // uint8_t status[1];
-    // read_GY271_registers(9, status, 1);
+    // read_i2c_registers(9, status, 1);
     // std::cout << int(status[0]) << "\n";
-    read_GY271_registers(3, data, 6);
+    read_i2c_registers(3, data, 6);
     float x = (data[0] << 8 | data[1]) - 475 + 990 - 963 - 109;
     // short z = (data[2] << 8 | data[3]);
     // short y = data[4] << 8 | data[5];
@@ -196,10 +196,10 @@ void init_i2c()
 	ESP_ERROR_CHECK(i2c_param_config(I2C_NUM_0, &conf));
 	ESP_ERROR_CHECK(i2c_driver_install(I2C_NUM_0, I2C_MODE_MASTER, 0, 0, 0));
 
-    // write_GY271_register(2, 0x00); // continuous mode 
-    // write_GY271_register(0, 0x54); // set 30Hz, oversampling 4
+    // write_i2c_register(2, 0x00); // continuous mode 
+    // write_i2c_register(0, 0x54); // set 30Hz, oversampling 4
 
-    write_GY271_register(1, 0x00);
+    write_i2c_register(1, 0x00);
 
 	conf.mode = I2C_MODE_MASTER;
 	conf.sda_io_num = (gpio_num_t)PIN_SDA_AS5600;
