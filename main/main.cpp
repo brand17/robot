@@ -9,8 +9,8 @@
 #include "esp_timer.h"
 #include "driver/mcpwm.h"
 
-#define PIN_SDA_GY271 21
-#define PIN_CLK_GY271 22
+#define PIN_SDA_GEO 21
+#define PIN_CLK_GEO 22
 // #define GPIO_GY271_INTERRUPT GPIO_NUM_36
 #define ESP_INTR_FLAG_DEFAULT 0
 
@@ -67,12 +67,12 @@ void Engine::setDuty(float duty){
     brushed_motor_set_duty(duty); 
 }
 
-#define I2C_ADDRESS_GY271 0x1e
+#define I2C_ADDRESS_GEO 0x1e
 
 void write_GY271_register(const uint8_t reg, const uint8_t data){
     i2c_cmd_handle_t cmd = i2c_cmd_link_create();
     ESP_ERROR_CHECK(i2c_master_start(cmd));
-    ESP_ERROR_CHECK(i2c_master_write_byte(cmd, (I2C_ADDRESS_GY271 << 1) | I2C_MASTER_WRITE, 1));
+    ESP_ERROR_CHECK(i2c_master_write_byte(cmd, (I2C_ADDRESS_GEO << 1) | I2C_MASTER_WRITE, 1));
     ESP_ERROR_CHECK(i2c_master_write_byte(cmd, reg, 1)); // Data registers
     ESP_ERROR_CHECK(i2c_master_write_byte(cmd, data, 1)); 
     ESP_ERROR_CHECK(i2c_master_stop(cmd));
@@ -85,7 +85,7 @@ void write_GY271_register(const uint8_t reg, const uint8_t data){
 void read_GY271_registers(const uint8_t reg, uint8_t* data, const uint8_t bytes){
     i2c_cmd_handle_t cmd = i2c_cmd_link_create();
     ESP_ERROR_CHECK(i2c_master_start(cmd));
-    ESP_ERROR_CHECK(i2c_master_write_byte(cmd, (I2C_ADDRESS_GY271 << 1) | I2C_MASTER_WRITE, 1));
+    ESP_ERROR_CHECK(i2c_master_write_byte(cmd, (I2C_ADDRESS_GEO << 1) | I2C_MASTER_WRITE, 1));
     ESP_ERROR_CHECK(i2c_master_write_byte(cmd, reg, 1)); // Data registers
     ESP_ERROR_CHECK(i2c_master_stop(cmd));
     esp_err_t err;
@@ -96,7 +96,7 @@ void read_GY271_registers(const uint8_t reg, uint8_t* data, const uint8_t bytes)
 
     cmd = i2c_cmd_link_create();
     ESP_ERROR_CHECK(i2c_master_start(cmd));
-    ESP_ERROR_CHECK(i2c_master_write_byte(cmd, (I2C_ADDRESS_GY271 << 1) | I2C_MASTER_READ, 1));
+    ESP_ERROR_CHECK(i2c_master_write_byte(cmd, (I2C_ADDRESS_GEO << 1) | I2C_MASTER_READ, 1));
     // ESP_ERROR_CHECK(i2c_master_read(cmd, data, bytes, (i2c_ack_type_t) 1));
     for (uint8_t i = 0; i < bytes - 1; i++)
         ESP_ERROR_CHECK(i2c_master_read_byte(cmd, data + i, (i2c_ack_type_t) 0));
@@ -195,8 +195,8 @@ void init_i2c()
 {
 	i2c_config_t conf;
 	conf.mode = I2C_MODE_MASTER;
-	conf.sda_io_num = (gpio_num_t)PIN_SDA_GY271;
-	conf.scl_io_num = (gpio_num_t)PIN_CLK_GY271;
+	conf.sda_io_num = (gpio_num_t)PIN_SDA_GEO;
+	conf.scl_io_num = (gpio_num_t)PIN_CLK_GEO;
 	conf.sda_pullup_en = GPIO_PULLUP_ENABLE;
 	conf.scl_pullup_en = GPIO_PULLUP_ENABLE;
 	conf.master.clk_speed = 1000000;
