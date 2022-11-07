@@ -87,22 +87,14 @@ void read_GY271_registers(const uint8_t reg, uint8_t* data, const uint8_t bytes)
     ESP_ERROR_CHECK(i2c_master_start(cmd));
     ESP_ERROR_CHECK(i2c_master_write_byte(cmd, (I2C_ADDRESS_GEO << 1) | I2C_MASTER_WRITE, 1));
     ESP_ERROR_CHECK(i2c_master_write_byte(cmd, reg, 1)); // Data registers
+    ESP_ERROR_CHECK(i2c_master_start(cmd));
+    ESP_ERROR_CHECK(i2c_master_write_byte(cmd, (I2C_ADDRESS_GEO << 1) | I2C_MASTER_READ, 1));
+    ESP_ERROR_CHECK(i2c_master_read(cmd, data, bytes - 1, (i2c_ack_type_t) 0));
+    ESP_ERROR_CHECK(i2c_master_read_byte(cmd, data + bytes - 1, (i2c_ack_type_t) 1));
     ESP_ERROR_CHECK(i2c_master_stop(cmd));
     esp_err_t err;
     do err = i2c_master_cmd_begin(I2C_NUM_0, cmd, 1000/portTICK_PERIOD_MS);
     while (err != ESP_OK);
-
-    i2c_cmd_link_delete(cmd);
-
-    cmd = i2c_cmd_link_create();
-    ESP_ERROR_CHECK(i2c_master_start(cmd));
-    ESP_ERROR_CHECK(i2c_master_write_byte(cmd, (I2C_ADDRESS_GEO << 1) | I2C_MASTER_READ, 1));
-    // ESP_ERROR_CHECK(i2c_master_read(cmd, data, bytes, (i2c_ack_type_t) 1));
-    for (uint8_t i = 0; i < bytes - 1; i++)
-        ESP_ERROR_CHECK(i2c_master_read_byte(cmd, data + i, (i2c_ack_type_t) 0));
-    ESP_ERROR_CHECK(i2c_master_read_byte(cmd, data + bytes - 1, (i2c_ack_type_t) 1));
-    ESP_ERROR_CHECK(i2c_master_stop(cmd));
-    ESP_ERROR_CHECK(i2c_master_cmd_begin(I2C_NUM_0, cmd, 1000/portTICK_PERIOD_MS));
     i2c_cmd_link_delete(cmd);
 }
 
