@@ -89,7 +89,8 @@ void read_i2c_registers(const uint8_t reg, uint8_t* data, const uint8_t bytes){
     ESP_ERROR_CHECK(i2c_master_write_byte(cmd, reg, 1)); // Data registers
     ESP_ERROR_CHECK(i2c_master_start(cmd));
     ESP_ERROR_CHECK(i2c_master_write_byte(cmd, (I2C_ADDRESS_GEO << 1) | I2C_MASTER_READ, 1));
-    ESP_ERROR_CHECK(i2c_master_read(cmd, data, bytes - 1, (i2c_ack_type_t) 0));
+    if (bytes > 1)
+        ESP_ERROR_CHECK(i2c_master_read(cmd, data, bytes - 1, (i2c_ack_type_t) 0));
     ESP_ERROR_CHECK(i2c_master_read_byte(cmd, data + bytes - 1, (i2c_ack_type_t) 1));
     ESP_ERROR_CHECK(i2c_master_stop(cmd));
     esp_err_t err;
@@ -101,18 +102,26 @@ void read_i2c_registers(const uint8_t reg, uint8_t* data, const uint8_t bytes){
 // Multisample msf = Multisample(16);
 
 float angles_GY271(){
-    // printf("core is %i ", xPortGetCoreID());
 	uint8_t data[6];
     write_i2c_register(2, 1); // single measurement mode
+    read_i2c_registers(3, data, 6);
+    float x = (data[0] << 8 | data[1]) - 475 + 990 - 963 - 109;
+    return x;
+}
+
+float angles_LIS3MDL(){
+    // printf("core is %i ", xPortGetCoreID());
+	uint8_t data[6];
+    // write_i2c_register(2, 1); // single measurement mode 
     // uint8_t status[1];
     // read_i2c_registers(9, status, 1);
     // std::cout << int(status[0]) << "\n";
-    read_i2c_registers(3, data, 6);
-    float x = (data[0] << 8 | data[1]) - 475 + 990 - 963 - 109;
+    read_i2c_registers(0x28, data, 6);
+    float x = (data[0] << 8 | data[1]);
     // short z = (data[2] << 8 | data[3]);
     // short y = data[4] << 8 | data[5];
     // int angle = atan2((double)z,(double)x) * (180 / 3.14159265) + 180; // angle in degrees
-    // ESP_LOGI("angles", "x: %d", x);
+    std::cout << "x=" << x << "\n";
     // vTaskDelay(1000/portTICK_PERIOD_MS);
 
     return x;
@@ -120,7 +129,7 @@ float angles_GY271(){
 
 float Sensor::angle(){
     xSemaphoreTake(xMutexMpu, portMAX_DELAY);
-    auto x = angles_GY271();
+    auto x = angles_LIS3MDL();
     // std::cout << getTime() << "\n";
     xSemaphoreGive(xMutexMpu);
     return x;
@@ -191,7 +200,7 @@ void init_i2c()
 	conf.scl_io_num = (gpio_num_t)PIN_CLK_GEO;
 	conf.sda_pullup_en = GPIO_PULLUP_ENABLE;
 	conf.scl_pullup_en = GPIO_PULLUP_ENABLE;
-	conf.master.clk_speed = 1000000;
+	conf.master.clk_speed = 400000;
     conf.clk_flags = 0;
 	ESP_ERROR_CHECK(i2c_param_config(I2C_NUM_0, &conf));
 	ESP_ERROR_CHECK(i2c_driver_install(I2C_NUM_0, I2C_MODE_MASTER, 0, 0, 0));
@@ -199,7 +208,13 @@ void init_i2c()
     // write_i2c_register(2, 0x00); // continuous mode 
     // write_i2c_register(0, 0x54); // set 30Hz, oversampling 4
 
-    write_i2c_register(1, 0x00);
+    // write_i2c_register(1, 0x00);
+
+    // uint8_t reg;
+    // read_i2c_registers(0x0f, &reg, 1);
+    // std::cout << "LIS3MDL address: " << int(reg) << "\n";
+    // write_i2c_register(0x20, 0x1e); // 1000 Hz ODR
+    // write_i2c_register(0x22, 0); // continuous mode
 
 	conf.mode = I2C_MODE_MASTER;
 	conf.sda_io_num = (gpio_num_t)PIN_SDA_AS5600;
@@ -217,7 +232,7 @@ void app_main(void)
 {
     init_i2c();
 
-    // int del = 3000;
+    int del = 300000;
     // int div = 1000000 / del / 2;
     // for (float d = 30; d > 0; d--)
     // {
@@ -228,18 +243,18 @@ void app_main(void)
     // float duty = 100;
     // brushed_motor_set_duty(duty); 
     // for (int i = 0; i < 10000000 / del; i++)
-    // while (true)
-    // {
-    //     // if (i % div == 0) 
-    //     // {
-    //     //     if (duty > 0) duty = -100;
-    //     //     else duty = 100;
-    //     //     brushed_motor_set_duty(duty); 
-    //     // }
-    //     auto r = angles_GY271();
-    //     std::cout << r[0] << " " << "\n";
-    //     usleep(del);
-    // }
+    while (true)
+    {
+        // if (i % div == 0) 
+        // {
+        //     if (duty > 0) duty = -100;
+        //     else duty = 100;
+        //     brushed_motor_set_duty(duty); 
+        // }
+        auto r = angles_LIS3MDL();
+        // std::cout << r << " " << "\n";
+        usleep(del);
+    }
 
     // solver.test();
     xTaskCreatePinnedToCore(&task_display, "disp_task", 8192, NULL, tskIDLE_PRIORITY, NULL, 0);
