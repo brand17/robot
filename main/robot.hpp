@@ -264,15 +264,17 @@ class Solver
 public:
     Solver()
     {
-        _sensor = Sensor(4, false);
+        _sensor = Sensor(8, false);
         // _engine = Engine();
     }
 
     void changeEngineAcc()
     {
         auto s = _sensor.update();
+        if (s == 1000000) 
+            return;
         auto e = _engine.update();
-        if (s == 1000000 or e == 1000000) 
+        if (e == 1000000) 
             return;
         Vector<MAT_SIZE> obs; 
         obs.segment<3>(1) << _sensor.observations.pos, _sensor.observations.velocity, _sensor.observations.acc; 

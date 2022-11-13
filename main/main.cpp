@@ -98,8 +98,6 @@ void write_i2c_register(const uint8_t reg, const uint8_t* data, const uint8_t by
     i2c_cmd_link_delete(cmd);
 }
 
-// static lis3mdl_sensor_t* sensor;
-
 void read_i2c_registers(uint8_t reg, uint8_t* data, const uint8_t bytes){
     i2c_cmd_handle_t cmd = i2c_cmd_link_create();
     ESP_ERROR_CHECK(i2c_master_start(cmd));
@@ -139,22 +137,28 @@ int64_t getTime(){
     return esp_timer_get_time();
 }
 
+// static lis3mdl_sensor_t* sensor;
+
 float angles_LIS3MDL(){
     // printf("core is %i ", xPortGetCoreID());
     // std::cout << "angles_LIS3MDL called\n";
 	uint8_t data[6];
-    read_i2c_registers(0x27, data, 1);
-    // std::cout << "status=" << int(data[0]) << "\n";
-    if (data[0] == 0)
-    {
-        write_i2c_register(0x22, 0); // continuous mode
-    }
+    do {
+        read_i2c_registers(0x27, data, 1);
+        if (data[0] == 0)
+            write_i2c_register(0x22, 0); // continuous mode
+    } while (data[0] == 0);
+    // if (data[0] == 0)
+    // {
+    //     // std::cout << "status=" << int(data[0]) << "\n";
+    // }
     read_i2c_registers(0x28, data, 6);
     int16_t x = ((uint16_t)data[1] << 8) | data[0];
+    // std::cout << int(data[0]) << " " << int(data[1]) << x << "\n";
     // int16_t y = ((uint16_t)data[3] << 8) | data[2];
     // int16_t z = ((uint16_t)data[5] << 8) | data[4];
     // std::cout << x << " " << y << " " << z << "\n";
-    return x + 900;
+    return x + 210;
 
     // lis3mdl_float_data_t  data2;
 
@@ -247,10 +251,10 @@ void init_i2c()
     // write_i2c_register(1, 0x00);
 
     // sensor = lis3mdl_init_sensor (I2C_NUM_0, LIS3MDL_I2C_ADDRESS_2, 0);
-    // lis3mdl_set_scale(sensor, lis3mdl_scale_4_Gs);
+    // lis3mdl_set_scale(sensor, lis3mdl_scale_16_Gs);
     // lis3mdl_set_mode (sensor, lis3mdl_lpm_1000);
 
-    uint8_t ctrl_regs[5] = { 0x02, 0x00, 0x00, 0x00, 0x00 };
+    uint8_t ctrl_regs[5] = { 0x02, 0x60, 0x00, 0x00, 0x00 };
     uint8_t int_cfg = 0x00;
     write_i2c_register(0x20, ctrl_regs, 5);
     write_i2c_register(0x30, &int_cfg, 1);
