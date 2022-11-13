@@ -264,7 +264,7 @@ class Solver
 public:
     Solver()
     {
-        _sensor = Sensor(8, false);
+        _sensor = Sensor(4, false);
         // _engine = Engine();
     }
 
@@ -330,7 +330,7 @@ public:
         if (!isnan(newAcc))
         {
             _duty = constrain((newAcc + MIN_ENGINE_PWM) / eng_cos, -100, 100);
-            // std::cout << obs.transpose().format(_HeavyFmt) << " " << newAcc << " " << _duty << " " << eng_cos;// << "\n";
+            std::cout << obs.transpose().format(_HeavyFmt) << " " << newAcc << " " << _duty << " " << eng_cos;// << "\n";
             // std::cout << ratios.transpose().format(_HeavyFmt);
             _engine.setDuty(_duty); // printf("height=%i acc=%f\n", _height, newAcc);
         }

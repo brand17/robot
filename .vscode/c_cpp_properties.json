@@ -11,6 +11,7 @@
                 "${config:idf.espAdfPath}/components/**",
                 "${config:idf.espAdfPathWin}/components/**",
                 "${workspaceFolder}/**",
+                "C:/Users/FA.PROJECTOR-MSK/YandexDisk/Software/esp/robot/components/**",
                 "C:/Users/FA.PROJECTOR-MSK/YandexDisk/Software/cpp/eigen/**"
             ],
             "browse": {
@@ -20,6 +21,7 @@
                     "${config:idf.espAdfPath}/components",
                     "${config:idf.espAdfPathWin}/components",
                     "${workspaceFolder}",
+                    "C:/Users/FA.PROJECTOR-MSK/YandexDisk/Software/esp/robot/components",
                     "C:/Users/FA.PROJECTOR-MSK/YandexDisk/Software/cpp/eigen"
                 ],
                 "limitSymbolsToIncludedHeaders": false

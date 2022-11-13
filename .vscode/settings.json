@@ -130,7 +130,8 @@
         "sparseextra": "cpp",
         "specialfunctions": "cpp",
         "splines": "cpp",
-        "mcpwm.h": "c"
+        "mcpwm.h": "c",
+        "lis3mdl.h": "c"
     },
     "idf.openOcdConfigs": [
         "interface/ftdi/esp32_devkitj_v1.cfg",
