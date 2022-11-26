@@ -2,3 +2,5 @@ build/
 debug.log
 *.xlsx
 sdkconfig.old
+*.pdf
+*.docx
