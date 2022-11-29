@@ -158,7 +158,7 @@ float angles_LIS3MDL(){
     // int16_t y = ((uint16_t)data[3] << 8) | data[2];
     // int16_t z = ((uint16_t)data[5] << 8) | data[4];
     // std::cout << x << " " << y << " " << z << "\n";
-    return x + 210;
+    return x + 585;
 
     // lis3mdl_float_data_t  data2;
 
@@ -240,7 +240,7 @@ void init_i2c()
 	conf.scl_io_num = (gpio_num_t)PIN_CLK_GEO;
 	conf.sda_pullup_en = GPIO_PULLUP_ENABLE;
 	conf.scl_pullup_en = GPIO_PULLUP_ENABLE;
-	conf.master.clk_speed = 400000;
+	conf.master.clk_speed = 1000000;
     conf.clk_flags = 0;
 	ESP_ERROR_CHECK(i2c_param_config(I2C_NUM_0, &conf));
 	ESP_ERROR_CHECK(i2c_driver_install(I2C_NUM_0, I2C_MODE_MASTER, 0, 0, 0));
@@ -281,6 +281,73 @@ void init_i2c()
 
 void app_main(void)
 {
+    int status;
+    size_t i, iter = 0;
+
+    const size_t n = 2;
+    struct rparams p = {1.0, 10.0};
+
+    double x_init[2] = {-10.0, -5.0};
+    gsl_vector *x = gsl_vector_alloc(n);
+
+    gsl_vector_set(x, 0, x_init[0]);
+    gsl_vector_set(x, 1, x_init[1]);
+
+    auto sf = gsl_multiroot_fsolver_alloc(gsl_multiroot_fsolver_hybrids, 2);
+    gsl_multiroot_function f = {&rosenbrock_f, n, &p};
+    gsl_multiroot_fsolver_set(sf, &f, x);
+
+    print_state(iter, sf);
+
+    do
+    {
+        iter++;
+        status = gsl_multiroot_fsolver_iterate(sf);
+
+        print_state(iter, sf);
+
+        if (status) /* check if solver is stuck */
+            break;
+
+        status =
+            gsl_multiroot_test_residual(sf->f, 1e-7);
+    } while (status == GSL_CONTINUE && iter < 1000);
+
+    printf("status = %s\n", gsl_strerror(status));
+
+    gsl_multiroot_fsolver_free(sf);
+
+    gsl_multiroot_function_fdf fdf = {&rosenbrock_f,
+                                    &rosenbrock_df,
+                                    &rosenbrock_fdf,
+                                    n, &p};
+
+    auto s = gsl_multiroot_fdfsolver_alloc (gsl_multiroot_fdfsolver_gnewton, n);
+    gsl_multiroot_fdfsolver_set (s, &fdf, x);
+
+    print_state (iter, (gsl_multiroot_fsolver*)s);
+
+    do
+        {
+        iter++;
+
+        status = gsl_multiroot_fdfsolver_iterate (s);
+
+        print_state (iter, (gsl_multiroot_fsolver*)s);
+
+        if (status)
+            break;
+
+        status = gsl_multiroot_test_residual (s->f, 1e-7);
+        }
+    while (status == GSL_CONTINUE && iter < 1000);
+
+    printf ("status = %s\n", gsl_strerror (status));
+
+    gsl_multiroot_fdfsolver_free (s);
+
+    gsl_vector_free(x);
+
     init_i2c();
 
     // for (float d = 30; d > 0; d--)
@@ -303,7 +370,7 @@ void app_main(void)
     //     //     brushed_motor_set_duty(duty); 
     //     // }
     //     auto r = angles_LIS3MDL();
-    //     // std::cout << r << " " << "\n";
+    //     std::cout << r << " " << "\n";
     //     usleep(del);
     // }
 
