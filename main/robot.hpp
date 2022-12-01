@@ -14,69 +14,87 @@ int64_t getTime();
 
 void print_state (size_t iter, gsl_multiroot_fsolver * s)
 {
-  printf ("iter = %3u x = % .3f % .3f "
-          "f(x) = % .3e % .3e %i\n",
+  printf ("iter = %3u x = % .3f % .3f % .3f "
+          "f(x) = % .3e % .3e % .3e %i\n",
           iter,
           gsl_vector_get (s->x, 0),
           gsl_vector_get (s->x, 1),
+          gsl_vector_get (s->x, 2),
           gsl_vector_get (s->f, 0),
           gsl_vector_get (s->f, 1),
+          gsl_vector_get (s->f, 2),
           (int) getTime());
 }
 
 struct rparams
   {
-    double a;
-    double b;
+    double pos[4], dt[3], duty[3], v;
   };
 
 int rosenbrock_f (const gsl_vector * x, void *params,
               gsl_vector * f)
 {
-  double a = ((struct rparams *) params)->a;
-  double b = ((struct rparams *) params)->b;
+    auto pos = ((struct rparams *) params)->pos;
+    auto dt = ((struct rparams *) params)->dt;
+    auto duty = ((struct rparams *) params)->duty;
+    double v[3], x_[3], y[3];
+    v[0] = ((struct rparams *) params)->v;
 
-  const double x0 = gsl_vector_get (x, 0);
-  const double x1 = gsl_vector_get (x, 1);
+    const double b = gsl_vector_get (x, 0);
+    const double h = gsl_vector_get (x, 1);
+    const double i = gsl_vector_get (x, 2);
+    const double revb = 1. / b;
 
-  const double y0 = a * (1 - x0);
-  const double y1 = b * (x1 - x0 * x0);
+    const double g[3] = {cbrt(h * log(duty[0]) + i),
+                         cbrt(h * log(duty[1]) + i),
+                         cbrt(h * log(duty[2]) + i)};
 
-  gsl_vector_set (f, 0, y0);
-  gsl_vector_set (f, 1, y1);
+    const double edt[3] = {exp(b * dt[0]), exp(b * dt[1]), exp(b * dt[2])};
+    x_[0] = pos[0];
+    for (uint8_t j = 0; j < 2; j++){
+        const uint8_t k = j + 1;
+        const double dv = v[j] - g[j];
+        x_[k] = dv * revb * (edt[j] - 1) + g[j] * dt[j] + x_[j];
+        y[j] = x_[k] - pos[k];
+        gsl_vector_set (f, j, y[j]);
+        v[k] = dv * edt[j] + g[j];
+    }
+    const double dv = v[2] - g[2];
+    y[2] = dv * revb * (edt[2] - 1) + g[2] * dt[2] + x_[2] - pos[3];
+    gsl_vector_set (f, 2, y[2]);
 
-  return GSL_SUCCESS;
+    return GSL_SUCCESS;
 }
 
-int rosenbrock_df (const gsl_vector * x, void *params,
-               gsl_matrix * J)
-{
-  const double a = ((struct rparams *) params)->a;
-  const double b = ((struct rparams *) params)->b;
+// int rosenbrock_df (const gsl_vector * x, void *params,
+//                gsl_matrix * J)
+// {
+//   const double a = ((struct rparams *) params)->a;
+//   const double b = ((struct rparams *) params)->b;
 
-  const double x0 = gsl_vector_get (x, 0);
+//   const double x0 = gsl_vector_get (x, 0);
 
-  const double df00 = -a;
-  const double df01 = 0;
-  const double df10 = -2 * b  * x0;
-  const double df11 = b;
+//   const double df00 = -a;
+//   const double df01 = 0;
+//   const double df10 = -2 * b  * x0;
+//   const double df11 = b;
 
-  gsl_matrix_set (J, 0, 0, df00);
-  gsl_matrix_set (J, 0, 1, df01);
-  gsl_matrix_set (J, 1, 0, df10);
-  gsl_matrix_set (J, 1, 1, df11);
+//   gsl_matrix_set (J, 0, 0, df00);
+//   gsl_matrix_set (J, 0, 1, df01);
+//   gsl_matrix_set (J, 1, 0, df10);
+//   gsl_matrix_set (J, 1, 1, df11);
 
-  return GSL_SUCCESS;
-}
+//   return GSL_SUCCESS;
+// }
 
-int rosenbrock_fdf (const gsl_vector * x, void *params,
-                gsl_vector * f, gsl_matrix * J)
-{
-  rosenbrock_f (x, params, f);
-  rosenbrock_df (x, params, J);
+// int rosenbrock_fdf (const gsl_vector * x, void *params,
+//                 gsl_vector * f, gsl_matrix * J)
+// {
+//   rosenbrock_f (x, params, f);
+//   rosenbrock_df (x, params, J);
 
-  return GSL_SUCCESS;
-}
+//   return GSL_SUCCESS;
+// }
 
 template <typename T>
 int sgn(T val)

@@ -284,16 +284,20 @@ void app_main(void)
     int status;
     size_t i, iter = 0;
 
-    const size_t n = 2;
-    struct rparams p = {1.0, 10.0};
+    const size_t n = 3;
+    struct rparams p = {{0, 0.151268855, 0.294686326, 0.484266061},
+                        {0.738686685, 0.394917738, 0.424630435},
+                        {0.288339009, 0.05, 0.996708909},
+                        0};
 
-    double x_init[2] = {-10.0, -5.0};
+    double x_init[] = {-2, 1, 1};
     gsl_vector *x = gsl_vector_alloc(n);
 
     gsl_vector_set(x, 0, x_init[0]);
     gsl_vector_set(x, 1, x_init[1]);
+    gsl_vector_set(x, 2, x_init[2]);
 
-    auto sf = gsl_multiroot_fsolver_alloc(gsl_multiroot_fsolver_hybrids, 2);
+    auto sf = gsl_multiroot_fsolver_alloc(gsl_multiroot_fsolver_hybrids, n);
     gsl_multiroot_function f = {&rosenbrock_f, n, &p};
     gsl_multiroot_fsolver_set(sf, &f, x);
 
@@ -317,36 +321,37 @@ void app_main(void)
 
     gsl_multiroot_fsolver_free(sf);
 
-    gsl_multiroot_function_fdf fdf = {&rosenbrock_f,
-                                    &rosenbrock_df,
-                                    &rosenbrock_fdf,
-                                    n, &p};
+    // gsl_multiroot_function_fdf fdf = {&rosenbrock_f,
+    //                                 &rosenbrock_df,
+    //                                 &rosenbrock_fdf,
+    //                                 n, &p};
 
-    auto s = gsl_multiroot_fdfsolver_alloc (gsl_multiroot_fdfsolver_gnewton, n);
-    gsl_multiroot_fdfsolver_set (s, &fdf, x);
+    // auto s = gsl_multiroot_fdfsolver_alloc (gsl_multiroot_fdfsolver_gnewton, n);
+    // gsl_multiroot_fdfsolver_set (s, &fdf, x);
 
-    print_state (iter, (gsl_multiroot_fsolver*)s);
+    // print_state (iter, (gsl_multiroot_fsolver*)s);
 
-    do
-        {
-        iter++;
+    // do
+    //     {
+    //     iter++;
 
-        status = gsl_multiroot_fdfsolver_iterate (s);
+    //     status = gsl_multiroot_fdfsolver_iterate (s);
 
-        print_state (iter, (gsl_multiroot_fsolver*)s);
+    //     print_state (iter, (gsl_multiroot_fsolver*)s);
 
-        if (status)
-            break;
+    //     if (status)
+    //         break;
 
-        status = gsl_multiroot_test_residual (s->f, 1e-7);
-        }
-    while (status == GSL_CONTINUE && iter < 1000);
+    //     status = gsl_multiroot_test_residual (s->f, 1e-7);
+    //     }
+    // while (status == GSL_CONTINUE && iter < 1000);
 
-    printf ("status = %s\n", gsl_strerror (status));
+    // printf ("status = %s\n", gsl_strerror (status));
 
-    gsl_multiroot_fdfsolver_free (s);
+    // gsl_multiroot_fdfsolver_free (s);
 
     gsl_vector_free(x);
+    return;
 
     init_i2c();
 
