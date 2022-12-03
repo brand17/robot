@@ -297,58 +297,58 @@ void app_main(void)
     gsl_vector_set(x, 1, x_init[1]);
     gsl_vector_set(x, 2, x_init[2]);
 
-    auto sf = gsl_multiroot_fsolver_alloc(gsl_multiroot_fsolver_hybrids, n);
-    gsl_multiroot_function f = {&rosenbrock_f, n, &p};
-    gsl_multiroot_fsolver_set(sf, &f, x);
+    // auto sf = gsl_multiroot_fsolver_alloc(gsl_multiroot_fsolver_hybrids, n);
+    // gsl_multiroot_function f = {&rosenbrock_f, n, &p};
+    // gsl_multiroot_fsolver_set(sf, &f, x);
 
-    print_state(iter, sf);
-
-    do
-    {
-        iter++;
-        status = gsl_multiroot_fsolver_iterate(sf);
-
-        print_state(iter, sf);
-
-        if (status) /* check if solver is stuck */
-            break;
-
-        status =
-            gsl_multiroot_test_residual(sf->f, 1e-7);
-    } while (status == GSL_CONTINUE && iter < 1000);
-
-    printf("status = %s\n", gsl_strerror(status));
-
-    gsl_multiroot_fsolver_free(sf);
-
-    // gsl_multiroot_function_fdf fdf = {&rosenbrock_f,
-    //                                 &rosenbrock_df,
-    //                                 &rosenbrock_fdf,
-    //                                 n, &p};
-
-    // auto s = gsl_multiroot_fdfsolver_alloc (gsl_multiroot_fdfsolver_gnewton, n);
-    // gsl_multiroot_fdfsolver_set (s, &fdf, x);
-
-    // print_state (iter, (gsl_multiroot_fsolver*)s);
+    // print_state(iter, sf);
 
     // do
-    //     {
+    // {
     //     iter++;
+    //     status = gsl_multiroot_fsolver_iterate(sf);
 
-    //     status = gsl_multiroot_fdfsolver_iterate (s);
+    //     print_state(iter, sf);
 
-    //     print_state (iter, (gsl_multiroot_fsolver*)s);
-
-    //     if (status)
+    //     if (status) /* check if solver is stuck */
     //         break;
 
-    //     status = gsl_multiroot_test_residual (s->f, 1e-7);
-    //     }
-    // while (status == GSL_CONTINUE && iter < 1000);
+    //     status =
+    //         gsl_multiroot_test_residual(sf->f, 1e-7);
+    // } while (status == GSL_CONTINUE && iter < 50);
 
-    // printf ("status = %s\n", gsl_strerror (status));
+    // printf("status = %s\n", gsl_strerror(status));
 
-    // gsl_multiroot_fdfsolver_free (s);
+    // gsl_multiroot_fsolver_free(sf);
+
+    gsl_multiroot_function_fdf fdf = {&rosenbrock_f,
+                                    &rosenbrock_df,
+                                    &rosenbrock_fdf,
+                                    n, &p};
+
+    auto s = gsl_multiroot_fdfsolver_alloc (gsl_multiroot_fdfsolver_gnewton, n);
+    gsl_multiroot_fdfsolver_set (s, &fdf, x);
+
+    print_state (iter, (gsl_multiroot_fsolver*)s);
+
+    do
+        {
+        iter++;
+
+        status = gsl_multiroot_fdfsolver_iterate (s);
+
+        print_state (iter, (gsl_multiroot_fsolver*)s);
+
+        if (status)
+            break;
+
+        status = gsl_multiroot_test_residual (s->f, 1e-7);
+        }
+    while (status == GSL_CONTINUE && iter < 50);
+
+    printf ("status = %s\n", gsl_strerror (status));
+
+    gsl_multiroot_fdfsolver_free (s);
 
     gsl_vector_free(x);
     return;

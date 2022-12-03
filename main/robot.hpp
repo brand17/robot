@@ -37,7 +37,7 @@ int rosenbrock_f (const gsl_vector * x, void *params,
     auto pos = ((struct rparams *) params)->pos;
     auto dt = ((struct rparams *) params)->dt;
     auto duty = ((struct rparams *) params)->duty;
-    double v[3], x_[3], y[3];
+    double v[3], x_[3];
     v[0] = ((struct rparams *) params)->v;
 
     const double b = gsl_vector_get (x, 0);
@@ -45,56 +45,122 @@ int rosenbrock_f (const gsl_vector * x, void *params,
     const double i = gsl_vector_get (x, 2);
     const double revb = 1. / b;
 
-    const double g[3] = {cbrt(h * log(duty[0]) + i),
-                         cbrt(h * log(duty[1]) + i),
-                         cbrt(h * log(duty[2]) + i)};
-
-    const double edt[3] = {exp(b * dt[0]), exp(b * dt[1]), exp(b * dt[2])};
     x_[0] = pos[0];
-    for (uint8_t j = 0; j < 2; j++){
+    for (uint8_t j = 0; j < 3; j++){
         const uint8_t k = j + 1;
-        const double dv = v[j] - g[j];
-        x_[k] = dv * revb * (edt[j] - 1) + g[j] * dt[j] + x_[j];
-        y[j] = x_[k] - pos[k];
-        gsl_vector_set (f, j, y[j]);
-        v[k] = dv * edt[j] + g[j];
+        const double ln_duty = log(duty[j]);
+        const double g = cbrt(h * ln_duty + i);
+        const double dv = v[j] - g;
+        const double ebdt = exp(b * dt[j]);
+        x_[k] = dv * revb * (ebdt - 1) + g * dt[j] + x_[j];
+        gsl_vector_set (f, j, x_[k] - pos[k]);
+        if (k < 3)
+            v[k] = dv * ebdt + g;
     }
-    const double dv = v[2] - g[2];
-    y[2] = dv * revb * (edt[2] - 1) + g[2] * dt[2] + x_[2] - pos[3];
-    gsl_vector_set (f, 2, y[2]);
+    // const double dv = v[2] - g[2];
+    // y[2] = dv * revb * (edt[2] - 1) + g[2] * dt[2] + x_[2] - pos[3];
+    // gsl_vector_set (f, 2, y[2]);
 
     return GSL_SUCCESS;
 }
 
-// int rosenbrock_df (const gsl_vector * x, void *params,
-//                gsl_matrix * J)
-// {
-//   const double a = ((struct rparams *) params)->a;
-//   const double b = ((struct rparams *) params)->b;
+int rosenbrock_df (const gsl_vector * x, void *params,
+               gsl_matrix * J)
+{
+    auto pos = ((struct rparams *) params)->pos;
+    auto dt = ((struct rparams *) params)->dt;
+    auto duty = ((struct rparams *) params)->duty;
 
-//   const double x0 = gsl_vector_get (x, 0);
+    const double b = gsl_vector_get (x, 0);
+    const double h = gsl_vector_get (x, 1);
+    const double i = gsl_vector_get (x, 2);
 
-//   const double df00 = -a;
-//   const double df01 = 0;
-//   const double df10 = -2 * b  * x0;
-//   const double df11 = b;
+    double v[3], dvdb[3], dvdi[3], dvdh[3], dfdb[4], dfdh[4], dfdi[4];
+    v[0] = ((struct rparams *) params)->v;
+    dvdb[0] = 0; dvdi[0] = 0; dvdh[0] = 0;
+    dfdb[0] = 0; dfdi[0] = 0; dfdh[0] = 0;
+    const double revb = 1. / b;
 
-//   gsl_matrix_set (J, 0, 0, df00);
-//   gsl_matrix_set (J, 0, 1, df01);
-//   gsl_matrix_set (J, 1, 0, df10);
-//   gsl_matrix_set (J, 1, 1, df11);
+    for (uint8_t j = 0; j < 3; j++){
+        const uint8_t k = j + 1;
+        const double ln_duty = log(duty[j]);
+        const double g = cbrt(h * ln_duty + i);
+        const double dv = v[j] - g;
+        const double ebdt = exp(b * dt[j]);
+        const double edt_less_1 = ebdt - 1;
+        const double edt_less_1_by_b = edt_less_1 * revb;
+        const double dt_ebdt = dt[j] * ebdt;
+        dfdb[k] = revb * (dv * (dt_ebdt - edt_less_1_by_b) + dvdb[j] * edt_less_1) + dfdb[j];
+        const double dgdi = 1 / (3 * g * g);
+        dfdi[k] = edt_less_1_by_b * (dvdi[j] - dgdi) + dt[j] * dgdi + dfdi[j];
+        const double dgdh = dgdi * ln_duty;
+        dfdh[k] = edt_less_1_by_b * (dvdh[j] - dgdh) + dt[j] * dgdh + dfdh[j];
+        gsl_matrix_set (J, j, 0, dfdb[k]);
+        gsl_matrix_set (J, j, 1, dfdh[k]);
+        gsl_matrix_set (J, j, 2, dfdi[k]);
+        if (k < 3)
+        {
+            v[k] = dv * ebdt + g;
+            dvdb[k] = ebdt * (dvdb[j] + dt[j] * dv);
+            dvdi[k] = ebdt * (dvdi[j] - dgdi) + dgdi;
+            dvdh[k] = ebdt * (dvdh[j] - dgdh) + dgdh;
+        }
+    }
 
-//   return GSL_SUCCESS;
-// }
+    return GSL_SUCCESS;
+}
 
-// int rosenbrock_fdf (const gsl_vector * x, void *params,
-//                 gsl_vector * f, gsl_matrix * J)
-// {
-//   rosenbrock_f (x, params, f);
-//   rosenbrock_df (x, params, J);
+int rosenbrock_fdf (const gsl_vector * x, void *params,
+                gsl_vector * f, gsl_matrix * J)
+{
+    // rosenbrock_f (x, params, f);
+    // rosenbrock_df (x, params, J);
 
-//   return GSL_SUCCESS;
-// }
+    auto pos = ((struct rparams *) params)->pos;
+    auto dt = ((struct rparams *) params)->dt;
+    auto duty = ((struct rparams *) params)->duty;
+
+    const double b = gsl_vector_get (x, 0);
+    const double h = gsl_vector_get (x, 1);
+    const double i = gsl_vector_get (x, 2);
+
+    double v[3], dvdb[3], dvdi[3], dvdh[3], x_[3], dfdb[4], dfdh[4], dfdi[4];
+    v[0] = ((struct rparams *) params)->v;
+    dvdb[0] = 0; dvdi[0] = 0; dvdh[0] = 0; 
+    dfdb[0] = 0; dfdi[0] = 0; dfdh[0] = 0;
+    x_[0] = pos[0];
+    const double revb = 1. / b;
+
+    for (uint8_t j = 0; j < 3; j++){
+        const uint8_t k = j + 1;
+        const double ln_duty = log(duty[j]);
+        const double g = cbrt(h * ln_duty + i);
+        const double dv = v[j] - g;
+        const double ebdt = exp(b * dt[j]);
+        const double edt_less_1 = ebdt - 1;
+        const double edt_less_1_by_b = edt_less_1 * revb;
+        x_[k] = dv * edt_less_1_by_b + g * dt[j] + x_[j];
+        gsl_vector_set (f, j, x_[k] - pos[k]);
+        const double dt_ebdt = dt[j] * ebdt;
+        dfdb[k] = revb * (dv * (dt_ebdt - edt_less_1_by_b) + dvdb[j] * edt_less_1) + dfdb[j];
+        const double dgdi = 1 / (3 * g * g);
+        dfdi[k] = edt_less_1_by_b * (dvdi[j] - dgdi) + dt[j] * dgdi + dfdi[j];
+        const double dgdh = dgdi * ln_duty;
+        dfdh[k] = edt_less_1_by_b * (dvdh[j] - dgdh) + dt[j] * dgdh + dfdh[j];
+        gsl_matrix_set (J, j, 0, dfdb[k]);
+        gsl_matrix_set (J, j, 1, dfdh[k]);
+        gsl_matrix_set (J, j, 2, dfdi[k]);
+        if (k < 3)
+        {
+            v[k] = dv * ebdt + g;
+            dvdb[k] = ebdt * (dvdb[j] + dt[j] * dv);
+            dvdi[k] = ebdt * (dvdi[j] - dgdi) + dgdi;
+            dvdh[k] = ebdt * (dvdh[j] - dgdh) + dgdh;
+        }
+    }
+
+    return GSL_SUCCESS;
+}
 
 template <typename T>
 int sgn(T val)
