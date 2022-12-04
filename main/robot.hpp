@@ -26,19 +26,19 @@ void print_state (size_t iter, gsl_multiroot_fsolver * s)
           (int) getTime());
 }
 
-struct rparams
+struct duty2pos_params
   {
-    double pos[4], dt[3], duty[3], v;
+    double pos[4], dt[3], duty[3], v[4], acc[3];
   };
 
-int rosenbrock_f (const gsl_vector * x, void *params,
+int duty2pos_f (const gsl_vector * x, void *params,
               gsl_vector * f)
 {
-    auto pos = ((struct rparams *) params)->pos;
-    auto dt = ((struct rparams *) params)->dt;
-    auto duty = ((struct rparams *) params)->duty;
-    double v[3], x_[3];
-    v[0] = ((struct rparams *) params)->v;
+    auto pos = ((struct duty2pos_params *) params)->pos;
+    auto dt = ((struct duty2pos_params *) params)->dt;
+    auto duty = ((struct duty2pos_params *) params)->duty;
+    double x_[3];
+    auto v = ((struct duty2pos_params *) params)->v;
 
     const double b = gsl_vector_get (x, 0);
     const double h = gsl_vector_get (x, 1);
@@ -54,29 +54,25 @@ int rosenbrock_f (const gsl_vector * x, void *params,
         const double ebdt = exp(b * dt[j]);
         x_[k] = dv * revb * (ebdt - 1) + g * dt[j] + x_[j];
         gsl_vector_set (f, j, x_[k] - pos[k]);
-        if (k < 3)
-            v[k] = dv * ebdt + g;
+        v[k] = dv * ebdt + g;
     }
-    // const double dv = v[2] - g[2];
-    // y[2] = dv * revb * (edt[2] - 1) + g[2] * dt[2] + x_[2] - pos[3];
-    // gsl_vector_set (f, 2, y[2]);
 
     return GSL_SUCCESS;
 }
 
-int rosenbrock_df (const gsl_vector * x, void *params,
+int duty2pos_df (const gsl_vector * x, void *params,
                gsl_matrix * J)
 {
-    auto pos = ((struct rparams *) params)->pos;
-    auto dt = ((struct rparams *) params)->dt;
-    auto duty = ((struct rparams *) params)->duty;
+    auto dt = ((struct duty2pos_params *) params)->dt;
+    auto duty = ((struct duty2pos_params *) params)->duty;
+    auto acc = ((struct duty2pos_params *) params)->acc;
 
     const double b = gsl_vector_get (x, 0);
     const double h = gsl_vector_get (x, 1);
     const double i = gsl_vector_get (x, 2);
 
-    double v[3], dvdb[3], dvdi[3], dvdh[3], dfdb[4], dfdh[4], dfdi[4];
-    v[0] = ((struct rparams *) params)->v;
+    double dvdb[3], dvdi[3], dvdh[3], dfdb[4], dfdh[4], dfdi[4];
+    auto v = ((struct duty2pos_params *) params)->v;
     dvdb[0] = 0; dvdi[0] = 0; dvdh[0] = 0;
     dfdb[0] = 0; dfdi[0] = 0; dfdh[0] = 0;
     const double revb = 1. / b;
@@ -98,6 +94,7 @@ int rosenbrock_df (const gsl_vector * x, void *params,
         gsl_matrix_set (J, j, 0, dfdb[k]);
         gsl_matrix_set (J, j, 1, dfdh[k]);
         gsl_matrix_set (J, j, 2, dfdi[k]);
+        acc[j] = dv * b;
         if (k < 3)
         {
             v[k] = dv * ebdt + g;
@@ -110,56 +107,120 @@ int rosenbrock_df (const gsl_vector * x, void *params,
     return GSL_SUCCESS;
 }
 
-int rosenbrock_fdf (const gsl_vector * x, void *params,
+int duty2pos_fdf (const gsl_vector * x, void *params,
                 gsl_vector * f, gsl_matrix * J)
 {
-    // rosenbrock_f (x, params, f);
-    // rosenbrock_df (x, params, J);
+    duty2pos_f (x, params, f);
+    duty2pos_df (x, params, J);
 
-    auto pos = ((struct rparams *) params)->pos;
-    auto dt = ((struct rparams *) params)->dt;
-    auto duty = ((struct rparams *) params)->duty;
+    // optimised approach - saves 0.3% only
 
-    const double b = gsl_vector_get (x, 0);
-    const double h = gsl_vector_get (x, 1);
-    const double i = gsl_vector_get (x, 2);
+    // auto pos = ((struct rparams *) params)->pos;
+    // auto dt = ((struct rparams *) params)->dt;
+    // auto duty = ((struct rparams *) params)->duty;
 
-    double v[3], dvdb[3], dvdi[3], dvdh[3], x_[3], dfdb[4], dfdh[4], dfdi[4];
-    v[0] = ((struct rparams *) params)->v;
-    dvdb[0] = 0; dvdi[0] = 0; dvdh[0] = 0; 
-    dfdb[0] = 0; dfdi[0] = 0; dfdh[0] = 0;
-    x_[0] = pos[0];
-    const double revb = 1. / b;
+    // const double b = gsl_vector_get (x, 0);
+    // const double h = gsl_vector_get (x, 1);
+    // const double i = gsl_vector_get (x, 2);
 
-    for (uint8_t j = 0; j < 3; j++){
-        const uint8_t k = j + 1;
-        const double ln_duty = log(duty[j]);
-        const double g = cbrt(h * ln_duty + i);
-        const double dv = v[j] - g;
-        const double ebdt = exp(b * dt[j]);
-        const double edt_less_1 = ebdt - 1;
-        const double edt_less_1_by_b = edt_less_1 * revb;
-        x_[k] = dv * edt_less_1_by_b + g * dt[j] + x_[j];
-        gsl_vector_set (f, j, x_[k] - pos[k]);
-        const double dt_ebdt = dt[j] * ebdt;
-        dfdb[k] = revb * (dv * (dt_ebdt - edt_less_1_by_b) + dvdb[j] * edt_less_1) + dfdb[j];
-        const double dgdi = 1 / (3 * g * g);
-        dfdi[k] = edt_less_1_by_b * (dvdi[j] - dgdi) + dt[j] * dgdi + dfdi[j];
-        const double dgdh = dgdi * ln_duty;
-        dfdh[k] = edt_less_1_by_b * (dvdh[j] - dgdh) + dt[j] * dgdh + dfdh[j];
-        gsl_matrix_set (J, j, 0, dfdb[k]);
-        gsl_matrix_set (J, j, 1, dfdh[k]);
-        gsl_matrix_set (J, j, 2, dfdi[k]);
-        if (k < 3)
-        {
-            v[k] = dv * ebdt + g;
-            dvdb[k] = ebdt * (dvdb[j] + dt[j] * dv);
-            dvdi[k] = ebdt * (dvdi[j] - dgdi) + dgdi;
-            dvdh[k] = ebdt * (dvdh[j] - dgdh) + dgdh;
-        }
-    }
+    // double v[3], dvdb[3], dvdi[3], dvdh[3], x_[3], dfdb[4], dfdh[4], dfdi[4];
+    // v[0] = ((struct rparams *) params)->v;
+    // dvdb[0] = 0; dvdi[0] = 0; dvdh[0] = 0; 
+    // dfdb[0] = 0; dfdi[0] = 0; dfdh[0] = 0;
+    // x_[0] = pos[0];
+    // const double revb = 1. / b;
+
+    // for (uint8_t j = 0; j < 3; j++){
+    //     const uint8_t k = j + 1;
+    //     const double ln_duty = log(duty[j]);
+    //     const double g = cbrt(h * ln_duty + i);
+    //     const double dv = v[j] - g;
+    //     const double ebdt = exp(b * dt[j]);
+    //     const double edt_less_1 = ebdt - 1;
+    //     const double edt_less_1_by_b = edt_less_1 * revb;
+    //     x_[k] = dv * edt_less_1_by_b + g * dt[j] + x_[j];
+    //     gsl_vector_set (f, j, x_[k] - pos[k]);
+    //     const double dt_ebdt = dt[j] * ebdt;
+    //     dfdb[k] = revb * (dv * (dt_ebdt - edt_less_1_by_b) + dvdb[j] * edt_less_1) + dfdb[j];
+    //     const double dgdi = 1 / (3 * g * g);
+    //     dfdi[k] = edt_less_1_by_b * (dvdi[j] - dgdi) + dt[j] * dgdi + dfdi[j];
+    //     const double dgdh = dgdi * ln_duty;
+    //     dfdh[k] = edt_less_1_by_b * (dvdh[j] - dgdh) + dt[j] * dgdh + dfdh[j];
+    //     gsl_matrix_set (J, j, 0, dfdb[k]);
+    //     gsl_matrix_set (J, j, 1, dfdh[k]);
+    //     gsl_matrix_set (J, j, 2, dfdi[k]);
+    //     if (k < 3)
+    //     {
+    //         v[k] = dv * ebdt + g;
+    //         dvdb[k] = ebdt * (dvdb[j] + dt[j] * dv);
+    //         dvdi[k] = ebdt * (dvdi[j] - dgdi) + dgdi;
+    //         dvdh[k] = ebdt * (dvdh[j] - dgdh) + dgdh;
+    //     }
+    // }
 
     return GSL_SUCCESS;
+}
+
+struct DutyReturn
+{
+    double b, h, i, duty;        
+}; 
+
+DutyReturn get_duty(duty2pos_params &p, double x_init[3], double a4)
+{
+    int status;
+    size_t iter = 0;
+    const size_t n = 3;
+
+    gsl_vector *x = gsl_vector_alloc(n);
+
+    gsl_vector_set(x, 0, x_init[0]);
+    gsl_vector_set(x, 1, x_init[1]);
+    gsl_vector_set(x, 2, x_init[2]);
+
+    gsl_multiroot_function_fdf fdf = {&duty2pos_f,
+                                    &duty2pos_df,
+                                    &duty2pos_fdf,
+                                    n, &p};
+
+    auto s = gsl_multiroot_fdfsolver_alloc (gsl_multiroot_fdfsolver_gnewton, n);
+    gsl_multiroot_fdfsolver_set (s, &fdf, x);
+
+    print_state (iter, (gsl_multiroot_fsolver*)s);
+
+    do
+        {
+        iter++;
+
+        status = gsl_multiroot_fdfsolver_iterate (s);
+
+        print_state (iter, (gsl_multiroot_fsolver*)s);
+
+        if (status)
+            break;
+
+        status = gsl_multiroot_test_residual (s->f, 1e-7);
+        }
+    while (status == GSL_CONTINUE && iter < 50);
+
+    printf ("status = %s\n", gsl_strerror (status));
+
+    // std::cout << p.v[0] << " " << p.v[1] << " " << p.v[2] << " "<< p.v[3] << "\n";
+    // std::cout << p.acc[0] << " " << p.acc[1] << " " << p.acc[2] << "\n";
+    auto b = gsl_vector_get(s->x, 0);
+    auto h = gsl_vector_get(s->x, 1);
+    auto i = gsl_vector_get(s->x, 2);
+
+    DutyReturn res = {b, h, i, exp((pow(p.v[3] - a4 / b, 3) - i)/h)};
+
+    // res.duty = exp((pow(p.v[3] - a4 / b, 3) - i)/h);
+    // std::cout << res.duty << "\n";
+
+    gsl_multiroot_fdfsolver_free (s);
+
+    gsl_vector_free(x);
+
+    return res;
 }
 
 template <typename T>
