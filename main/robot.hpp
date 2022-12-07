@@ -9,6 +9,7 @@
 #define MIN_ENGINE_PWM 30
 #include <gsl/gsl_vector.h>
 #include <gsl/gsl_multiroots.h>
+using std::vector;
 
 int64_t getTime();
 
@@ -27,17 +28,17 @@ void print_state (size_t iter, gsl_multiroot_fsolver * s)
 }
 
 struct duty2pos_params
-  {
-    double pos[4], dt[3], duty[3], v[4], acc[3];
-  };
+{
+    vector<double> pos, t, duty, v, acc;
+};
 
 int duty2pos_f (const gsl_vector * x, void *params,
               gsl_vector * f)
 {
     auto pos = ((struct duty2pos_params *) params)->pos;
-    auto dt = ((struct duty2pos_params *) params)->dt;
+    auto t = ((struct duty2pos_params *) params)->t;
     auto duty = ((struct duty2pos_params *) params)->duty;
-    double x_[3];
+    double x_[4];
     auto v = ((struct duty2pos_params *) params)->v;
 
     const double b = gsl_vector_get (x, 0);
@@ -51,8 +52,9 @@ int duty2pos_f (const gsl_vector * x, void *params,
         const double ln_duty = log(duty[j]);
         const double g = cbrt(h * ln_duty + i);
         const double dv = v[j] - g;
-        const double ebdt = exp(b * dt[j]);
-        x_[k] = dv * revb * (ebdt - 1) + g * dt[j] + x_[j];
+        const double dt = t[k] - t[j];
+        const double ebdt = exp(b * dt);
+        x_[k] = dv * revb * (ebdt - 1) + g * dt + x_[j];
         gsl_vector_set (f, j, x_[k] - pos[k]);
         v[k] = dv * ebdt + g;
     }
@@ -63,7 +65,7 @@ int duty2pos_f (const gsl_vector * x, void *params,
 int duty2pos_df (const gsl_vector * x, void *params,
                gsl_matrix * J)
 {
-    auto dt = ((struct duty2pos_params *) params)->dt;
+    auto t = ((struct duty2pos_params *) params)->t;
     auto duty = ((struct duty2pos_params *) params)->duty;
     auto acc = ((struct duty2pos_params *) params)->acc;
 
@@ -82,15 +84,16 @@ int duty2pos_df (const gsl_vector * x, void *params,
         const double ln_duty = log(duty[j]);
         const double g = cbrt(h * ln_duty + i);
         const double dv = v[j] - g;
-        const double ebdt = exp(b * dt[j]);
+        const double dt = t[k] - t[j];
+        const double ebdt = exp(b * dt);
         const double edt_less_1 = ebdt - 1;
         const double edt_less_1_by_b = edt_less_1 * revb;
-        const double dt_ebdt = dt[j] * ebdt;
+        const double dt_ebdt = dt * ebdt;
         dfdb[k] = revb * (dv * (dt_ebdt - edt_less_1_by_b) + dvdb[j] * edt_less_1) + dfdb[j];
         const double dgdi = 1 / (3 * g * g);
-        dfdi[k] = edt_less_1_by_b * (dvdi[j] - dgdi) + dt[j] * dgdi + dfdi[j];
+        dfdi[k] = edt_less_1_by_b * (dvdi[j] - dgdi) + dt * dgdi + dfdi[j];
         const double dgdh = dgdi * ln_duty;
-        dfdh[k] = edt_less_1_by_b * (dvdh[j] - dgdh) + dt[j] * dgdh + dfdh[j];
+        dfdh[k] = edt_less_1_by_b * (dvdh[j] - dgdh) + dt * dgdh + dfdh[j];
         gsl_matrix_set (J, j, 0, dfdb[k]);
         gsl_matrix_set (J, j, 1, dfdh[k]);
         gsl_matrix_set (J, j, 2, dfdi[k]);
@@ -98,7 +101,7 @@ int duty2pos_df (const gsl_vector * x, void *params,
         if (k < 3)
         {
             v[k] = dv * ebdt + g;
-            dvdb[k] = ebdt * (dvdb[j] + dt[j] * dv);
+            dvdb[k] = ebdt * (dvdb[j] + dt * dv);
             dvdi[k] = ebdt * (dvdi[j] - dgdi) + dgdi;
             dvdh[k] = ebdt * (dvdh[j] - dgdh) + dgdh;
         }
@@ -163,7 +166,8 @@ int duty2pos_fdf (const gsl_vector * x, void *params,
 
 struct DutyReturn
 {
-    double b, h, i, duty;        
+    vector<double> x_init;
+    double duty;
 }; 
 
 DutyReturn get_duty(duty2pos_params &p, double x_init[3], double a4)
@@ -211,7 +215,7 @@ DutyReturn get_duty(duty2pos_params &p, double x_init[3], double a4)
     auto h = gsl_vector_get(s->x, 1);
     auto i = gsl_vector_get(s->x, 2);
 
-    DutyReturn res = {b, h, i, exp((pow(p.v[3] - a4 / b, 3) - i)/h)};
+    DutyReturn res = {vector<double>{b, h, i}, exp((pow(p.v[3] - a4 / b, 3) - i)/h)};
 
     // res.duty = exp((pow(p.v[3] - a4 / b, 3) - i)/h);
     // std::cout << res.duty << "\n";
@@ -386,7 +390,7 @@ using Matrix = Eigen::Matrix<float, rowSize, colSize>;
 Eigen::IOFormat _HeavyFmt(Eigen::FullPrecision, Eigen::DontAlignCols, " ", "\n", "", "", "\n", "");
 
 #define ZERO_LIMIT 1e-3
-#define MAT_SIZE 3 + 3 + 1
+#define MAT_SIZE 3 + 3
 
 bool isZero(Vector<MAT_SIZE> col){
     return (col.array() == 0).all();
@@ -480,27 +484,26 @@ public:
     Solver()
     {
         _sensor = Sensor(8, false);
-        // _engine = Engine();
     }
 
-    void changeEngineAcc()
+    vector<double> changeEngineAcc(vector<double> &x_init)
     {
         auto s = _sensor.update();
         if (s == 1000000) 
-            return;
+            return vector<double>(x_init);
         auto e = _engine.update();
         if (e == 1000000) 
-            return;
+            return vector<double>(x_init);
         Vector<MAT_SIZE> obs; 
         obs.segment<3>(1) << _sensor.observations.pos, _sensor.observations.velocity, _sensor.observations.acc; 
         auto engObs = &_engine.observations;
-        obs.tail<3>() << engObs->pos, engObs->velocity, engObs->acc;
-        auto eng_cos = sqrtf(1 - engObs->pos * engObs->pos);
+        obs.tail<2>() << engObs->pos, engObs->velocity;
+        // auto eng_cos = sqrtf(1 - engObs->pos * engObs->pos);
         // if (eng_cos == 0 or isnan(eng_cos)) 
             // std::cout  << "eng_cos is " << eng_cos << " " << engObs->pos << "\n";
-        obs[0] = (_duty - MIN_ENGINE_PWM) * eng_cos;
+        obs[0] = engObs->acc;
         if (isZero(obs))
-            return;
+            return vector<double>(x_init);
         float newAcc = NAN;
         int ri;
         if (_height == MAT_SIZE)
@@ -546,15 +549,29 @@ public:
         _observations.row(MAT_SIZE - 1) = obs.transpose();
         if (!isnan(newAcc))
         {
-            _duty = constrain((newAcc + MIN_ENGINE_PWM) / eng_cos, -100, 100);
-            std::cout << obs.transpose().format(_HeavyFmt) << " " << newAcc << " " << _duty << " " << eng_cos;// << "\n";
+            auto pos = _observations.col(1).tail(4);
+            auto dt = _observations.col(6).tail(3);
+            auto duties = _observations.col(7).tail(3);
+            duty2pos_params p = {
+                {pos[0], pos[1], pos[2], pos[3]},
+                {dt[0], dt[1], dt[2]},
+                {duties[0], duties[1], duties[2]},
+                {_observations.col(5).tail(4)[0], 0, 0, 0}, // velocity
+                {0, 0, 0} // acceleration
+            };
+            auto duty_pos = get_duty(p, x_init.data(), newAcc);
+            _duty = duty_pos.duty * 100;
+            _duty = constrain(_duty, -100, 100);
+            std::cout << obs.transpose().format(_HeavyFmt) << " " << newAcc << " " << _duty;// << "\n";
             // std::cout << ratios.transpose().format(_HeavyFmt);
             _engine.setDuty(_duty); // printf("height=%i acc=%f\n", _height, newAcc);
+            return duty_pos.x_init;
         }
         else 
         {
             std::cout  << " newAcc is Nan!!!\n";
             _engine.setDuty(0);
+            return vector<double>(x_init);
         }
         // std::cout << getTime() - t << " ";
     }
