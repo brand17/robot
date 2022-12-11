@@ -29,7 +29,7 @@ void print_state (size_t iter, gsl_multiroot_fsolver * s)
 
 struct duty2pos_params
 {
-    vector<double> pos, t, duty, v, acc;
+    double pos[4], t[4], duty[3], v[4], acc[3];
 };
 
 int duty2pos_f (const gsl_vector * x, void *params,
@@ -49,8 +49,8 @@ int duty2pos_f (const gsl_vector * x, void *params,
     x_[0] = pos[0];
     for (uint8_t j = 0; j < 3; j++){
         const uint8_t k = j + 1;
-        const double ln_duty = log(duty[j]);
-        const double g = cbrt(h * ln_duty + i);
+        const double d = duty[j];
+        const double g = h + i / d;
         const double dv = v[j] - g;
         const double dt = t[k] - t[j];
         const double ebdt = exp(b * dt);
@@ -81,8 +81,10 @@ int duty2pos_df (const gsl_vector * x, void *params,
 
     for (uint8_t j = 0; j < 3; j++){
         const uint8_t k = j + 1;
-        const double ln_duty = log(duty[j]);
-        const double g = cbrt(h * ln_duty + i);
+        const double d = duty[j];
+        const double dgdi = 1 / d;
+        const double g = (h * d + i) * dgdi;
+        // const double ln_duty = log(d);
         const double dv = v[j] - g;
         const double dt = t[k] - t[j];
         const double ebdt = exp(b * dt);
@@ -90,10 +92,9 @@ int duty2pos_df (const gsl_vector * x, void *params,
         const double edt_less_1_by_b = edt_less_1 * revb;
         const double dt_ebdt = dt * ebdt;
         dfdb[k] = revb * (dv * (dt_ebdt - edt_less_1_by_b) + dvdb[j] * edt_less_1) + dfdb[j];
-        const double dgdi = 1 / (3 * g * g);
         dfdi[k] = edt_less_1_by_b * (dvdi[j] - dgdi) + dt * dgdi + dfdi[j];
-        const double dgdh = dgdi * ln_duty;
-        dfdh[k] = edt_less_1_by_b * (dvdh[j] - dgdh) + dt * dgdh + dfdh[j];
+        // const double dgdh = 1;
+        dfdh[k] = edt_less_1_by_b * (dvdh[j] - 1) + dt + dfdh[j];
         gsl_matrix_set (J, j, 0, dfdb[k]);
         gsl_matrix_set (J, j, 1, dfdh[k]);
         gsl_matrix_set (J, j, 2, dfdi[k]);
@@ -103,7 +104,7 @@ int duty2pos_df (const gsl_vector * x, void *params,
             v[k] = dv * ebdt + g;
             dvdb[k] = ebdt * (dvdb[j] + dt * dv);
             dvdi[k] = ebdt * (dvdi[j] - dgdi) + dgdi;
-            dvdh[k] = ebdt * (dvdh[j] - dgdh) + dgdh;
+            dvdh[k] = ebdt * (dvdh[j] - 1) + 1;
         }
     }
 
@@ -115,52 +116,6 @@ int duty2pos_fdf (const gsl_vector * x, void *params,
 {
     duty2pos_f (x, params, f);
     duty2pos_df (x, params, J);
-
-    // optimised approach - saves 0.3% only
-
-    // auto pos = ((struct rparams *) params)->pos;
-    // auto dt = ((struct rparams *) params)->dt;
-    // auto duty = ((struct rparams *) params)->duty;
-
-    // const double b = gsl_vector_get (x, 0);
-    // const double h = gsl_vector_get (x, 1);
-    // const double i = gsl_vector_get (x, 2);
-
-    // double v[3], dvdb[3], dvdi[3], dvdh[3], x_[3], dfdb[4], dfdh[4], dfdi[4];
-    // v[0] = ((struct rparams *) params)->v;
-    // dvdb[0] = 0; dvdi[0] = 0; dvdh[0] = 0; 
-    // dfdb[0] = 0; dfdi[0] = 0; dfdh[0] = 0;
-    // x_[0] = pos[0];
-    // const double revb = 1. / b;
-
-    // for (uint8_t j = 0; j < 3; j++){
-    //     const uint8_t k = j + 1;
-    //     const double ln_duty = log(duty[j]);
-    //     const double g = cbrt(h * ln_duty + i);
-    //     const double dv = v[j] - g;
-    //     const double ebdt = exp(b * dt[j]);
-    //     const double edt_less_1 = ebdt - 1;
-    //     const double edt_less_1_by_b = edt_less_1 * revb;
-    //     x_[k] = dv * edt_less_1_by_b + g * dt[j] + x_[j];
-    //     gsl_vector_set (f, j, x_[k] - pos[k]);
-    //     const double dt_ebdt = dt[j] * ebdt;
-    //     dfdb[k] = revb * (dv * (dt_ebdt - edt_less_1_by_b) + dvdb[j] * edt_less_1) + dfdb[j];
-    //     const double dgdi = 1 / (3 * g * g);
-    //     dfdi[k] = edt_less_1_by_b * (dvdi[j] - dgdi) + dt[j] * dgdi + dfdi[j];
-    //     const double dgdh = dgdi * ln_duty;
-    //     dfdh[k] = edt_less_1_by_b * (dvdh[j] - dgdh) + dt[j] * dgdh + dfdh[j];
-    //     gsl_matrix_set (J, j, 0, dfdb[k]);
-    //     gsl_matrix_set (J, j, 1, dfdh[k]);
-    //     gsl_matrix_set (J, j, 2, dfdi[k]);
-    //     if (k < 3)
-    //     {
-    //         v[k] = dv * ebdt + g;
-    //         dvdb[k] = ebdt * (dvdb[j] + dt[j] * dv);
-    //         dvdi[k] = ebdt * (dvdi[j] - dgdi) + dgdi;
-    //         dvdh[k] = ebdt * (dvdh[j] - dgdh) + dgdh;
-    //     }
-    // }
-
     return GSL_SUCCESS;
 }
 
@@ -215,7 +170,7 @@ DutyReturn get_duty(duty2pos_params &p, double x_init[3], double a4)
     auto h = gsl_vector_get(s->x, 1);
     auto i = gsl_vector_get(s->x, 2);
 
-    DutyReturn res = {vector<double>{b, h, i}, exp((pow(p.v[3] - a4 / b, 3) - i)/h)};
+    DutyReturn res = {vector<double>{b, h, i}, i / (p.v[3] - a4 / b - h)};
 
     // res.duty = exp((pow(p.v[3] - a4 / b, 3) - i)/h);
     // std::cout << res.duty << "\n";
@@ -223,7 +178,7 @@ DutyReturn get_duty(duty2pos_params &p, double x_init[3], double a4)
     gsl_multiroot_fdfsolver_free (s);
 
     gsl_vector_free(x);
-
+    // sleep(10);
     return res;
 }
 
@@ -402,14 +357,14 @@ class Solver
     Engine _engine;
     Eigen::PartialPivLU<Matrix<MAT_SIZE, MAT_SIZE>> _partialSolver;
 
-    Matrix<MAT_SIZE, MAT_SIZE> _observations = Matrix<MAT_SIZE, MAT_SIZE>::Zero();
+    Matrix<MAT_SIZE, MAT_SIZE + 2> _observations = Matrix<MAT_SIZE, MAT_SIZE + 2>::Zero();
     int _height = 0;
     float _duty = 0;
 
     std::vector<int> _getBasisIndices()
     {
         Eigen::Matrix<float, Eigen::Dynamic, MAT_SIZE, Eigen::RowMajor, MAT_SIZE, MAT_SIZE> m;  
-        m = _observations.bottomRows(_height);
+        m = _observations.bottomLeftCorner(_height, MAT_SIZE);
         std::vector<int> res;
         auto i = 0;
         for (int col = 0; col < MAT_SIZE; col++)
@@ -441,10 +396,10 @@ class Solver
         return res;
     }
 
-    int _replacedIndex(Vector<MAT_SIZE> &obs)
+    int _replacedIndex(Vector<MAT_SIZE + 2> &obs)
     {
         Eigen::Matrix<float, MAT_SIZE, MAT_SIZE + 1, Eigen::RowMajor> rowReduce;
-        rowReduce << _observations.transpose(), obs;
+        rowReduce << _observations.leftCols(MAT_SIZE).transpose(), obs.head(MAT_SIZE);
         auto subMatSize = std::min(MAT_SIZE, _height + 1);
         for (int i = 0; i < subMatSize; i++)
         {
@@ -471,7 +426,7 @@ class Solver
         return MAT_SIZE - subMatSize;
     }
 
-    Vector<MAT_SIZE> _nextObservations(const Vector<MAT_SIZE> &obs, const int index)
+    Vector<MAT_SIZE> _nextObservations(const Vector<MAT_SIZE + 2> &obs, const int index)
     {
         Vector<MAT_SIZE> next_values;
         int l = _height - 1;
@@ -490,25 +445,25 @@ public:
     {
         auto s = _sensor.update();
         if (s == 1000000) 
-            return vector<double>(x_init);
+            return x_init;
         auto e = _engine.update();
         if (e == 1000000) 
-            return vector<double>(x_init);
-        Vector<MAT_SIZE> obs; 
+            return x_init;
+        Vector<MAT_SIZE + 2> obs; 
         obs.segment<3>(1) << _sensor.observations.pos, _sensor.observations.velocity, _sensor.observations.acc; 
         auto engObs = &_engine.observations;
-        obs.tail<2>() << engObs->pos, engObs->velocity;
+        obs.tail<4>() << engObs->pos, engObs->velocity, getTime(), 0;
         // auto eng_cos = sqrtf(1 - engObs->pos * engObs->pos);
         // if (eng_cos == 0 or isnan(eng_cos)) 
             // std::cout  << "eng_cos is " << eng_cos << " " << engObs->pos << "\n";
         obs[0] = engObs->acc;
-        if (isZero(obs))
-            return vector<double>(x_init);
+        if (isZero(obs.head(MAT_SIZE)))
+            return x_init;
         float newAcc = NAN;
         int ri;
         if (_height == MAT_SIZE)
         {
-            _partialSolver.compute(_observations);
+            _partialSolver.compute(_observations.leftCols(MAT_SIZE));
             Matrix<MAT_SIZE, 3> ratios;
             for (int i = 0; i < 3; i++)
             {
@@ -525,7 +480,7 @@ public:
             if (_height > 1)
             {
                 auto ind = _getBasisIndices(); // basis indices
-                auto obsBasis = _observations.bottomRows(_height)(Eigen::all, ind);
+                auto obsBasis = _observations.bottomLeftCorner(_height, MAT_SIZE)(Eigen::all, ind);
                 auto dynSolver = obsBasis.partialPivLu();
                 Eigen::Matrix<float, Eigen::Dynamic, 3, 0, MAT_SIZE> ratios(_height, 3);
                 for (int i = 0; i < 3; i++)
@@ -549,29 +504,34 @@ public:
         _observations.row(MAT_SIZE - 1) = obs.transpose();
         if (!isnan(newAcc))
         {
-            auto pos = _observations.col(1).tail(4);
-            auto dt = _observations.col(6).tail(3);
-            auto duties = _observations.col(7).tail(3);
-            duty2pos_params p = {
-                {pos[0], pos[1], pos[2], pos[3]},
-                {dt[0], dt[1], dt[2]},
-                {duties[0], duties[1], duties[2]},
-                {_observations.col(5).tail(4)[0], 0, 0, 0}, // velocity
-                {0, 0, 0} // acceleration
-            };
-            auto duty_pos = get_duty(p, x_init.data(), newAcc);
-            _duty = duty_pos.duty * 100;
-            _duty = constrain(_duty, -100, 100);
-            std::cout << obs.transpose().format(_HeavyFmt) << " " << newAcc << " " << _duty;// << "\n";
-            // std::cout << ratios.transpose().format(_HeavyFmt);
-            _engine.setDuty(_duty); // printf("height=%i acc=%f\n", _height, newAcc);
-            return duty_pos.x_init;
+            if(_height > 3)
+            {
+                auto pos = _observations.col(1).tail(4);
+                auto t = _observations.col(6).tail(3);
+                auto duties = _observations.col(7).tail(3);
+                duty2pos_params p = {
+                    {pos[0], pos[1], pos[2], pos[3]},
+                    {t[0], t[1], t[2]},
+                    {duties[0], duties[1], duties[2]},
+                    {_observations.col(5).tail(4)[0], 0, 0, 0}, // velocity
+                    {0, 0, 0} // acceleration
+                };
+                auto duty_pos = get_duty(p, x_init.data(), newAcc);
+                _duty = duty_pos.duty * 100;
+                _duty = constrain(_duty, -100, 100);
+                std::cout << obs.transpose().format(_HeavyFmt) << " " << newAcc << " " << _duty << "\n";
+                // std::cout << ratios.transpose().format(_HeavyFmt);
+                _engine.setDuty(_duty); // printf("height=%i acc=%f\n", _height, newAcc);
+                _observations(MAT_SIZE - 1, MAT_SIZE + 1) = _duty;
+                return duty_pos.x_init;
+            }
+            return x_init;
         }
         else 
         {
             std::cout  << " newAcc is Nan!!!\n";
             _engine.setDuty(0);
-            return vector<double>(x_init);
+            return x_init;
         }
         // std::cout << getTime() - t << " ";
     }

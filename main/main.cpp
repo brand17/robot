@@ -282,15 +282,15 @@ void init_i2c()
 
 void app_main(void)
 {
-    struct duty2pos_params p = {{1, 1.673527927, 1.972815323, 2.273758742}, // positions
+    struct duty2pos_params p = {{1, 11.4380671505738, 37.3006540085341, 73.5050061255704}, // positions
                         {1, 1.738686685, 2.133604423, 2.558234859}, // time
-                        {0.288339009, 0.05, 0.996708909},// duty
+                        {-0.288339009, -0.05, -0.996708909},// duty
                         {1, 0, 0, 0}, // velocity
                         {0, 0, 0} // acceleration
                         }; 
 
     double x_init[] = {-2, 1, 1};
-    auto d = get_duty(p, x_init, 0.218530604);
+    auto d = get_duty(p, x_init, -39.0958356);
     return;
 
     init_i2c();
