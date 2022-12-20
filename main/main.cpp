@@ -60,12 +60,13 @@ Engine::Engine(){
     pwm_config.counter_mode = MCPWM_UP_COUNTER;         //up counting mode
     pwm_config.duty_mode = MCPWM_DUTY_MODE_0;
     ESP_ERROR_CHECK(mcpwm_init(MOTOR_CTRL_MCPWM_UNIT, MOTOR_CTRL_MCPWM_TIMER, &pwm_config));    //Configure PWM0A & PWM0B with above settings
-    setDuty(100);
+    // setDuty(100);
 }
 
 void Engine::setDuty(float duty){
-    // ESP_LOGI("writeServo", "Servo angle: %i", pos);
+    ESP_LOGI("setDuty", "duty: %f %f", duty, getTime());
     brushed_motor_set_duty(duty); 
+    _duty = duty;
 }
 
 #define I2C_ADDRESS_GEO 0x1e
@@ -133,8 +134,8 @@ float angles_GY271(){
     return x;
 }
 
-int64_t getTime(){
-    return esp_timer_get_time();
+float getTime(){
+    return esp_timer_get_time()/ 1000000.;
 }
 
 // static lis3mdl_sensor_t* sensor;
@@ -182,12 +183,12 @@ float Sensor::angle(){
 Solver solver;
 
 void task_display(void*){
-    vector<double> x_init{-2, 1, 1};
+    double x = -2;
 	while(1){
         // xSemaphoreTake(xBinarySemaphoreGY271Interrupt, portMAX_DELAY);
         // int64_t time_since_boot = esp_timer_get_time();
         // ESP_LOGI("Sensor changed", "One-shot timer called, time since boot: %lld us", time_since_boot);
-        x_init = solver.changeEngineAcc(x_init);
+        x = solver.changeEngineAcc(x);
     }
 	vTaskDelete(NULL);
 }
@@ -197,7 +198,7 @@ void task_display(void*){
 #define AS5600_SLAVE_ADDR 0x36
 #define AS5600_ANGLE_REGISTER_H 0x0E
 
-IRAM_ATTR static float read_angle_AS5600() 
+static float read_angle_AS5600() 
 {
     uint8_t write_buffer = AS5600_ANGLE_REGISTER_H;
     uint8_t read_buffer[2] = {0,0};
@@ -221,16 +222,10 @@ IRAM_ATTR static float read_angle_AS5600()
 
     float a = float((raw + 4096 + 2048 - 3338) % 4096 - 2048); 
     a /= 2048; 
-    a *= M_PI; 
-    a = sinf(a); 
+    // a *= M_PI; 
+    // a = sinf(a); 
     // std::cout << a << " ";
     return a;
-}
-
-float Engine::angle()
-{
-    float x = read_angle_AS5600();
-    return x;
 }
 
 void init_i2c()
@@ -280,20 +275,84 @@ void init_i2c()
     ESP_ERROR_CHECK(i2c_filter_enable(I2C_NUM_1, 7));
 }
 
+float AS5600_pos = -2, AS5600_prev_pos, AS5600_accum = 0;
+
+static void periodic_timer_callback(void* arg)
+{
+    // int64_t time_since_boot = esp_timer_get_time();
+    AS5600_prev_pos = AS5600_pos;
+    AS5600_pos = read_angle_AS5600();
+    // ESP_LOGI("angle", "prev_pos=%f pos=%f acc=%f t=%i", AS5600_prev_pos, AS5600_pos, AS5600_accum, (int)getTime());
+    if (AS5600_prev_pos > -2)
+    {
+        if (AS5600_pos - AS5600_prev_pos < -1)
+        {
+            AS5600_accum += 2;
+        }
+        else if (AS5600_pos - AS5600_prev_pos > 1)
+        {
+            AS5600_accum -= 2;
+        }
+    }
+}
+
+float Engine::angle()
+{
+    periodic_timer_callback(NULL);
+    return AS5600_pos + AS5600_accum;
+}
+
 void app_main(void)
 {
-    struct duty2pos_params p = {{1, 11.4380671505738, 37.3006540085341, 73.5050061255704}, // positions
-                        {1, 1.738686685, 2.133604423, 2.558234859}, // time
-                        {-0.288339009, -0.05, -0.996708909},// duty
-                        {1, 0, 0, 0}, // velocity
-                        {0, 0, 0} // acceleration
-                        }; 
+    // struct duty2pos_params_multy p = {{1, 11.4380671505738, 37.3006540085341, 73.5050061255704}, // positions
+    //                     {1, 1.738686685, 2.133604423, 2.558234859}, // time
+    //                     {-0.288339009, -0.05, -0.996708909},// duty
+    //                     {1, 0, 0, 0}, // velocity
+    //                     {0, 0, 0} // acceleration
+    //                     }; 
 
-    double x_init[] = {-2, 1, 1};
-    auto d = get_duty(p, x_init, -39.0958356);
-    return;
+    // double x_init_multi[] = {-2, 1, 1};
+    // auto d = get_duty_multy(p, x_init_multi, -39.0958356);
+
+    // struct duty2pos_params p = {
+    //     {1, 1.522259072}, // positions
+    //     {1, 1.738686685}, // time
+    //     1,                // velocity
+    //     0,                // g
+    //     0                 // v1
+    // };
+
+    // auto d = get_duty(p, -2, 131.529007);
+
+    // solver.test();
+    // auto d = get_duty(
+    //     {-0.656738, -0.606445}, 
+    //     {0.107036, 0.126036}, 
+    //     2.646998, 
+    //     0.000000, 
+    //     -2.000000, 
+    //     2027.057251, 
+    //     0.730000, 
+    //     -0.130000);
+    // return;
 
     init_i2c();
+
+    const esp_timer_create_args_t periodic_timer_args = {
+            .callback = &periodic_timer_callback,
+            .name = "periodic"
+    };
+
+    esp_timer_handle_t periodic_timer;
+    ESP_ERROR_CHECK(esp_timer_create(&periodic_timer_args, &periodic_timer));
+
+    ESP_ERROR_CHECK(esp_timer_start_periodic(periodic_timer, 30000));
+
+    // while (true)
+    // {
+    //     printf("%f %f %f\n", AS5600_prev_pos, AS5600_pos, AS5600_accum + AS5600_pos);
+    //     usleep(100000);
+    // }   
 
     // for (float d = 30; d > 0; d--)
     // {
@@ -318,8 +377,9 @@ void app_main(void)
     //     std::cout << r << " " << "\n";
     //     usleep(del);
     // }
+    // brushed_motor_set_duty(100);
+    // usleep(10000000);
 
-    // solver.test();
     xTaskCreatePinnedToCore(&task_display, "disp_task", 8192, NULL, tskIDLE_PRIORITY, NULL, 0);
     // xTaskCreatePinnedToCore(&task_display, "disp_task", 8192, NULL, tskIDLE_PRIORITY, NULL, 1);
 
