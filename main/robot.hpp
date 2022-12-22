@@ -188,7 +188,7 @@ Dynamics observation(float pos0, float pos1, float vel0, float dt)
     // printf("pos: %2.0f\n", pos0);
     // printf("pos: %2.4f, velocity: %4.4f, acc: %6.4f, dt: %1.4f t: %1.4f ", pos0, vel0, dt);
     auto newAcc = (2 * (pos1 - pos0) - vel0 * dt) / (dt * dt);
-    return {pos1, newAcc * dt, newAcc};
+    return {pos1, vel0 + newAcc * dt, newAcc};
 }
 
 class Solver
@@ -322,7 +322,7 @@ public:
                 ratios.col(i) = _partialSolver.solve(sensData);
             }
             int l = MAT_SIZE - 1;
-            Vector<3> b; b.noalias() = ratios.transpose().rightCols(l) * obs.tail(l);
+            Vector<3> b; b.noalias() = ratios.transpose().rightCols(l) * obs.segment(1, l);
             Vector<3> a = ratios.row(0);
             newAcc = - b.dot(a) / a.dot(a);
         }
