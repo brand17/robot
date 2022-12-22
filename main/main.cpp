@@ -159,7 +159,7 @@ float angles_LIS3MDL(){
     // int16_t y = ((uint16_t)data[3] << 8) | data[2];
     // int16_t z = ((uint16_t)data[5] << 8) | data[4];
     // std::cout << x << " " << y << " " << z << "\n";
-    return x + 585;
+    return x + 670;
 
     // lis3mdl_float_data_t  data2;
 
