@@ -302,7 +302,10 @@ public:
         {
             auto s_obs = observation(_observations(MAT_SIZE - 1, 1), s, _observations(MAT_SIZE - 1, 2), dt);
             auto e_obs = observation(_observations(MAT_SIZE - 1, 4), e, _observations(MAT_SIZE - 1, 5), dt);
-            obs << (_duty - MIN_ENGINE_PWM) * eng_cos, s, s_obs.velocity, s_obs.acc, e, e_obs.velocity, e_obs.acc, curr_time, _engine.duty() / 100.; 
+            float d_adj;
+            if (_duty < 0) d_adj = MIN_ENGINE_PWM;
+            else d_adj = -MIN_ENGINE_PWM;
+            obs << (_duty + d_adj) * eng_cos, s, s_obs.velocity, s_obs.acc, e, e_obs.velocity, e_obs.acc, curr_time, _engine.duty() / 100.; 
         }
         else 
         {
@@ -325,6 +328,11 @@ public:
             Vector<3> b; b.noalias() = ratios.transpose().rightCols(l) * obs.segment(1, l);
             Vector<3> a = ratios.row(0);
             newAcc = - b.dot(a) / a.dot(a);
+            // std::cout << _observations.format(_HeavyFmt);
+            // std::cout << obs.transpose().format(_HeavyFmt) << " " << newAcc << "\n";
+            // std::cout << a.transpose().format(_HeavyFmt) << "\n";
+            // std::cout << b.transpose().format(_HeavyFmt) << "\n";
+            // std::cout << ratios.transpose().format(_HeavyFmt) << "\n";
         }
         else
         {
@@ -355,7 +363,10 @@ public:
         _observations.row(MAT_SIZE - 1) = obs.transpose();
         if (!isnan(newAcc))
         {
-            _duty = constrain((newAcc + MIN_ENGINE_PWM) / eng_cos, -100, 100);
+            _duty = newAcc / eng_cos;
+            if (_duty < 0) _duty -= MIN_ENGINE_PWM;
+            else _duty += MIN_ENGINE_PWM;
+            _duty = constrain(_duty, -100, 100);
             std::cout << obs.transpose().format(_HeavyFmt) << " " << newAcc << " " << _duty << " " << eng_cos;// << "\n";
             // std::cout << ratios.transpose().format(_HeavyFmt);
             // _engine.setDuty(_duty); // printf("height=%i acc=%f\n", _height, newAcc);
