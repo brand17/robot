@@ -278,7 +278,7 @@ class Solver
 public:
     Solver()
     {
-        _sensor = Sensor(32, false);
+        _sensor = Sensor(1, false);
         // _engine.setDuty(100);
     }
 
@@ -288,6 +288,7 @@ public:
         auto prev_time = _observations(MAT_SIZE - 1, 7);
         auto dt = curr_time - prev_time;
         auto s = _sensor.update(dt);
+        // ESP_LOGI("", "sensor %f", s);
         if (s == 1000000) 
             return;
         auto e = _engine.update(dt);
@@ -376,7 +377,7 @@ public:
             std::cout  << " newAcc is Nan!!!\n";
             // _engine.setDuty(0);
         }
-        // std::cout << getTime() - t << " ";
+        // std::cout << "\n" << getTime() - curr_time;
     }
 
     void test()

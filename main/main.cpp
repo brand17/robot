@@ -112,9 +112,11 @@ void read_i2c_registers(uint8_t reg, uint8_t* data, const uint8_t bytes){
     //     reg |= 0x80;
     ESP_ERROR_CHECK(i2c_master_write_byte(cmd, reg, 1));
     ESP_ERROR_CHECK(i2c_master_stop(cmd));
-    auto res = i2c_master_cmd_begin(I2C_NUM_0, cmd, 1/portTICK_PERIOD_MS);
-    // if (res == ESP_ERR_TIMEOUT) printf("timeout\n");
+    auto res = i2c_master_cmd_begin(I2C_NUM_0, cmd, 1000);
+    // if (res == ESP_ERR_TIMEOUT) ESP_LOGI("", "timeout1 %i", res);
     i2c_cmd_link_delete(cmd);
+
+    // usleep(2000);
 
     cmd = i2c_cmd_link_create();
     ESP_ERROR_CHECK(i2c_master_start(cmd));
@@ -123,8 +125,8 @@ void read_i2c_registers(uint8_t reg, uint8_t* data, const uint8_t bytes){
         ESP_ERROR_CHECK(i2c_master_read(cmd, data, bytes - 1, (i2c_ack_type_t) 0));
     ESP_ERROR_CHECK(i2c_master_read_byte(cmd, data + bytes - 1, (i2c_ack_type_t) 1));
     ESP_ERROR_CHECK(i2c_master_stop(cmd));
-    res = i2c_master_cmd_begin(I2C_NUM_0, cmd, 1/portTICK_PERIOD_MS);
-    // if (res == ESP_ERR_TIMEOUT) printf("timeout\n");
+    res = i2c_master_cmd_begin(I2C_NUM_0, cmd, 1000);
+    // if (res == ESP_ERR_TIMEOUT) ESP_LOGI("", "timeout2 %i", res);
     i2c_cmd_link_delete(cmd);
 }
 
@@ -172,59 +174,34 @@ float angles_LIS3MDL(){
 
 float angles_rm3100(){
     // printf("core is %i ", xPortGetCoreID());
-    // std::cout << "angles_LIS3MDL called\n";
-
-    // write_i2c_register(0x00, 0x70);
 	uint8_t data[9];
-    do {
+    do
+    {
         read_i2c_registers(0x34, data, 1);
         if ((data[0] & 0x80) != 0x80)
-            write_i2c_register(0x01, 0x71); // continuous mode
-    } while((data[0] & 0x80) != 0x80);
+        {
+            // ESP_LOGI("", "waiting status");
+            write_i2c_register(0x01, 0x41); // continuous mode
+        }
+    } while ((data[0] & 0x80) != 0x80);
 
-    read_i2c_registers(0x24, data, 9);
+    read_i2c_registers(0x2a, data, 3);
     // for (int i = 0; i < 9; i++)
     //     printf("%i ", data[i]);
     // printf("\n");
-    long x = 0, y = 0, z = 0;
+    long x = 0;
     if (data[0] & 0x80){
         x = 0xFF;
     }
-    if (data[3] & 0x80){
-        y = 0xFF;
-    }
-    if (data[6] & 0x80){
-        z = 0xFF;
-    }
 
-    //format results into single 32 bit signed value
     x = (x * 256 * 256 * 256) | (uint32_t)(data[0]) * 256 * 256 | (uint16_t)(data[1]) * 256 | data[2];
-    y = (y * 256 * 256 * 256) | (uint32_t)(data[3]) * 256 * 256 | (uint16_t)(data[4]) * 256 | data[5];
-    z = (z * 256 * 256 * 256) | (uint32_t)(data[6]) * 256 * 256 | (uint16_t)(data[7]) * 256 | data[8];
 
-    ESP_LOGI("angles_rm3100", "%ld %ld %ld\n", x, y, z);
-    // std::cout << int(data[0]) << " " << int(data[1]) << x << "\n";
-    // int16_t y = ((uint16_t)data[3] << 8) | data[2];
-    // int16_t z = ((uint16_t)data[5] << 8) | data[4];
-    // std::cout << x << " " << y << " " << z << "\n";
-
-    return x;
-
-    // lis3mdl_float_data_t  data2;
-
-    // if (//lis3mdl_new_data (sensor) &&
-    //     lis3mdl_get_float_data (sensor, &data2))
-    //     // max. full scale is +-16 g and best resolution is 1 mg, i.e. 5 digits
-    //     printf("%+7.3f %+7.3f %+7.3f\n",
-    //             data2.mx, data2.my, data2.mz);
-
-    // return data2.mx;
+    return x - 300;
 }
 
 float Sensor::angle(){
     xSemaphoreTake(xMutexMpu, portMAX_DELAY);
-    auto x = angles_LIS3MDL();
-    // std::cout << getTime() << "\n";
+    auto x = angles_rm3100();
     xSemaphoreGive(xMutexMpu);
     return x;
 }
@@ -234,7 +211,6 @@ Solver solver;
 void task_display(void*){
 	while(1){
         // xSemaphoreTake(xBinarySemaphoreGY271Interrupt, portMAX_DELAY);
-        // int64_t time_since_boot = esp_timer_get_time();
         // ESP_LOGI("Sensor changed", "One-shot timer called, time since boot: %lld us", time_since_boot);
         solver.changeEngineAcc();
     }
@@ -355,12 +331,20 @@ void init_i2c()
 void app_main(void)
 {
     init_i2c();
-    uint8_t data[1];
-    write_i2c_register(0x01, 0x71); // initialize continous measurement
-    while (true)
-    {
-        angles_rm3100();
-    }
+    write_i2c_register(0x01, 0x41); // initialize continous 
+    // write_i2c_register(0x04, 0x00); // CCX 
+    // write_i2c_register(0x05, 0x00); // CCX 
+    // write_i2c_register(0x06, 0x00); // CCY
+    // write_i2c_register(0x07, 0x00); // CCY 
+    // write_i2c_register(0x08, 0x00); // CCZ 
+    // write_i2c_register(0x09, 0x64); // CCZ 100 cycles = 850Hz
+    // write_i2c_register(0x0B, 0x92); // TMRC 600Hz
+    // setvbuf(stdout, NULL, _IONBF, 0);
+    // while (true)
+    // {
+    //     angles_rm3100();
+    //     usleep(100000);
+    // }
 
     // const esp_timer_create_args_t periodic_timer_args = {
     //         .callback = &periodic_timer_callback,
