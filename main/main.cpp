@@ -244,7 +244,8 @@ static float read_angle_AS5600()
     raw <<= 8;
     raw |= read_buffer[1];
 
-    float a = float((raw + 4096 + 2048 - 3338) % 4096 - 2048); 
+    float a = float((raw + 4096 + 2048 - 343) % 4096 - 2048); 
+    // printf("%f\n", a);
     a /= 2048; 
     a *= M_PI; 
     a = sinf(a); 
@@ -342,7 +343,8 @@ void app_main(void)
     // setvbuf(stdout, NULL, _IONBF, 0);
     // while (true)
     // {
-    //     angles_rm3100();
+    //     auto a = read_angle_AS5600();
+    //     // angles_rm3100();
     //     usleep(100000);
     // }
 
@@ -356,9 +358,9 @@ void app_main(void)
 
     // ESP_ERROR_CHECK(esp_timer_start_periodic(periodic_timer, 30000));
 
-    // for (float d = 30; d > 0; d--)
+    // for (float d = 100; d > 0; d--)
     // {
-    //     brushed_motor_set_duty(d); 
+    //     brushed_motor_set_duty(100); 
     //     std::cout << d << "\n";
     //     usleep(1000000);
     // }
