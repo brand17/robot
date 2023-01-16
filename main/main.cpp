@@ -339,14 +339,14 @@ void app_main(void)
     // write_i2c_register(0x07, 0x00); // CCY 
     // write_i2c_register(0x08, 0x00); // CCZ 
     // write_i2c_register(0x09, 0x64); // CCZ 100 cycles = 850Hz
-    // write_i2c_register(0x0B, 0x92); // TMRC 600Hz
+    write_i2c_register(0x0B, 0x96); // TMRC 600Hz
     // setvbuf(stdout, NULL, _IONBF, 0);
-    // while (true)
-    // {
-    //     auto a = read_angle_AS5600();
-    //     // angles_rm3100();
-    //     usleep(100000);
-    // }
+    while (true)
+    {
+        // auto a = read_angle_AS5600();
+        printf("%f\n", angles_rm3100());
+        usleep(100000);
+    }
 
     // const esp_timer_create_args_t periodic_timer_args = {
     //         .callback = &periodic_timer_callback,
