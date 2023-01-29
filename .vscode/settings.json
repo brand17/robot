@@ -1,5 +1,6 @@
 {
     "files.associations": {
-        "orangepi.h": "c"
+        "orangepi.h": "c",
+        "dense": "cpp"
     }
 }
