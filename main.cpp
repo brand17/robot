@@ -64,39 +64,31 @@ static float read_angle_AS5600(int fd_rm3100)
     return a;
 }
 
+#define L298N_IN2 6
 #define PWM_PIN 4
-
-void brushed_motor_set_duty(float duty_cycle)
-{
-    // if (duty_cycle > 0) {
-    //     mcpwm_set_signal_low(MOTOR_CTRL_MCPWM_UNIT, MOTOR_CTRL_MCPWM_TIMER, MCPWM_OPR_A);
-    //     mcpwm_set_duty(MOTOR_CTRL_MCPWM_UNIT, MOTOR_CTRL_MCPWM_TIMER, MCPWM_OPR_B, duty_cycle);
-    //     mcpwm_set_duty_type(MOTOR_CTRL_MCPWM_UNIT, MOTOR_CTRL_MCPWM_TIMER, MCPWM_OPR_B, MCPWM_DUTY_MODE_0);  //call this each time, if operator was previously in low/high state
-    // }
-    // else {
-    //     mcpwm_set_signal_low(MOTOR_CTRL_MCPWM_UNIT, MOTOR_CTRL_MCPWM_TIMER, MCPWM_OPR_B);
-    //     mcpwm_set_duty(MOTOR_CTRL_MCPWM_UNIT, MOTOR_CTRL_MCPWM_TIMER, MCPWM_OPR_A, -duty_cycle);
-    //     mcpwm_set_duty_type(MOTOR_CTRL_MCPWM_UNIT, MOTOR_CTRL_MCPWM_TIMER, MCPWM_OPR_A, MCPWM_DUTY_MODE_0); //call this each time, if operator was previously in low/high state
-    // }
-}
-
-extern "C"
-{
-    #include <OrangePi.h>
-}
 
 #include <sys/mman.h>
 #include <fcntl.h>
 #include <unistd.h>
 
-// void writeReg(uint32_t* page, int offset, int val)
-// {
-//     *(page + (offset >> 2)) = val;
-// }
+auto fd_mem = open ("/dev/mem", O_RDWR | O_SYNC | O_CLOEXEC);
+auto _0x0300a000 = (uint32_t *)mmap(0, 4*1024, PROT_READ | PROT_WRITE, MAP_SHARED, fd_mem, 0x0300a000);
 
-// int readReg(uint32_t* page, int offset)
+void brushed_motor_set_duty(float duty_cycle)
+{
+    if (duty_cycle > 0) {
+        digitalWrite (L298N_IN2, HIGH);
+        *(_0x0300a000 + (0x84 >> 2)) = 0xffff0000 + duty_cycle;
+    }
+    else {
+        digitalWrite (L298N_IN2, LOW);
+        *(_0x0300a000 + (0x84 >> 2)) = 0xffffffff + duty_cycle;
+    }
+}
+
+// extern "C"
 // {
-//     return *(page + (offset >> 2));
+//     #include <OrangePi.h>
 // }
 
 int main()
@@ -127,31 +119,26 @@ int main()
 
         if (wiringPiSetup() == -1)
             exit(1);
+        pinMode(L298N_IN2, OUTPUT);
 
-        auto fd = open ("/dev/mem", O_RDWR | O_SYNC | O_CLOEXEC);
-	    auto _0x0300a000 = (uint32_t *)mmap(0, 4*1024, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0x0300a000);
-	    auto _0x0300b000 = (uint32_t *)mmap(0, 4*1024, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0x0300b000);
+	    auto _0x0300b000 = (uint32_t *)mmap(0, 4*1024, PROT_READ | PROT_WRITE, MAP_SHARED, fd_mem, 0x0300b000);
 
-        printf("0x300b0fc=%x\n", *(_0x0300b000 + (0xfc >> 2))); // PH3 Port controller
-        printf("0x300a020=%x\n", *(_0x0300a000 + (0x20 >> 2))); // clock
-        printf("0x300a084=%x\n", *(_0x0300a000 + (0x84 >> 2))); // period
-        printf("0x300a088=%x\n", *(_0x0300a000 + (0x88 >> 2))); 
-        printf("0x300a080=%x\n", *(_0x0300a000 + (0x80 >> 2))); // mode, prescal_k
-        printf("0x300a040=%x\n", *(_0x0300a000 + (0x40 >> 2))); // enable
+        // printf("0x300b0fc=%x\n", *(_0x0300b000 + (0xfc >> 2))); // PH3 Port controller
+        // printf("0x300a020=%x\n", *(_0x0300a000 + (0x20 >> 2))); // clock
+        // printf("0x300a084=%x\n", *(_0x0300a000 + (0x84 >> 2))); // period
+        // // printf("0x300a088=%x\n", *(_0x0300a000 + (0x88 >> 2))); 
+        // printf("0x300a080=%x\n", *(_0x0300a000 + (0x80 >> 2))); // mode, prescal_k
+        // printf("0x300a040=%x\n", *(_0x0300a000 + (0x40 >> 2))); // enable
 
-        // *(_0x0300a000 + (0x40 >> 2)) = 0x00000000;
-        *(_0x0300b000 + (0xfc >> 2)) = 0x44554422;
-        *(_0x0300a000 + (0x20 >> 2)) = 0x00000010; // set gating_clk, bypass
-        *(_0x0300a000 + (0x80 >> 2)) = 0x00000000; // prescale, mode
-        *(_0x0300a000 + (0x84 >> 2)) = 0x04000400;
-        *(_0x0300a000 + (0x40 >> 2)) = 0x00000002;
-        // *(_0x0300b000 + (0xfc >> 2)) = 0x44554422;
+        *(_0x0300b000 + (0xfc >> 2)) = 0x44554422; // PH3 Port controller
+        *(_0x0300a000 + (0x20 >> 2)) = 0x00000010; // set gating_clk
+        *(_0x0300a000 + (0x80 >> 2)) = 0x00000001; // prescale, mode
+        // *(_0x0300a000 + (0x84 >> 2)) = 0x04000400; // period
+        *(_0x0300a000 + (0x40 >> 2)) = 0x00000002; // enable
 
-        for (float d = 1000; d > 0; d--)
+        for (float d = 1000; d > -1000; d--)
         {
-            // pwmWrite(PWM_PIN, d);
-            *(_0x0300a000 + (0x84 >> 2)) = 0x04000000 + d;
-            // brushed_motor_set_duty(d);
+            brushed_motor_set_duty(0xffff * d / 1000);
             printf("%f\n", d);
             usleep(10000);
         }
