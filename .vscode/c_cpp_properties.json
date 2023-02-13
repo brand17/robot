@@ -4,7 +4,8 @@
             "name": "Linux",
             "includePath": [
                 "${workspaceFolder}/**",
-                "${default}"
+                "${default}",
+                "/usr/local/include/eigen-3.4.0/**"
             ],
             "defines": [
                 "CONFIG_ORANGEPI", 

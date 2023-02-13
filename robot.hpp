@@ -1,0 +1,407 @@
+#include <iostream>
+#include <math.h>
+#include <array>
+#include <vector>
+#ifndef ARDUINO
+#define constrain(amt, low, high) ((amt) < (low) ? (low) : ((amt) > (high) ? (high) : (amt)))
+#endif
+#define MIN_ENGINE_PWM 30
+
+float getTime();
+
+template <typename T>
+int sgn(T val)
+{
+    return (T(0) < val) - (val < T(0));
+}
+
+class Dynamics
+{
+public:
+    float pos = 0, velocity = 0, acc = 0;
+    Dynamics(float p = 0, float v = 0, float a = 0) : pos(p), velocity(v), acc(a){};
+};
+
+#include <Eigen/Dense>
+
+class KalmanFilter
+{
+
+public:
+    KalmanFilter()
+    {
+        R = 1.3;
+        x_hat.setZero();
+        P = Eigen::DiagonalMatrix<float, 3>(0.00113, 0.00113, 0.00113);
+        I.setIdentity();
+    };
+
+    float get_pos(const float y, float dt)
+    {
+        F << 1, dt, dt * 0.5f,
+            0, 1, dt,
+            0, 0, 1;
+        update(y);
+        return x_hat(0);
+    }
+
+private:
+    void update(const float y)
+    {
+        x_hat_new = F * x_hat;
+        P = F * P * F.transpose();
+        K = P.col(0) / (P(0, 0) + R);
+        // auto P_ = P; auto x_ = x_hat_new;
+        x_hat_new += K * (y - x_hat_new(0));
+        auto m_ = I;
+        m_.col(0) -= K;
+        P = m_ * P;
+        // Eigen::MatrixXf m(3, 16); m << F, x_, P_, K, x_hat_new, P, Eigen::Vector3f(y, 0, 0), m_;
+        // std::string sep = "\n----------------------------------------\n";
+        // Eigen::IOFormat _HeavyFmt(Eigen::FullPrecision, Eigen::DontAlignCols, " ", "\n", "", "", "", "");
+        // std::cout << m.format(_HeavyFmt) << sep;
+        x_hat = x_hat_new;
+        // ESP_LOGI("", "K: %2.5f P: %2.5f", K(0, 0), P(0, 0));
+    }
+    Eigen::Matrix3f F, P;
+    float R;
+    Eigen::Matrix3f I;
+    Eigen::Vector3f K, x_hat, x_hat_new;
+};
+
+class Multisample{
+    std::vector<float> measures;
+    uint8_t index = 0;
+    float total = 0;
+    uint8_t size = 0;
+    float multiplier = 0;
+public:
+    Multisample(uint8_t s){
+        size = s;
+        measures.reserve(size);
+        multiplier = 1. / size;
+        std::cout << "multiplier: " << multiplier << "\n";
+    }
+    float get(float value){
+        if (measures.size() < size){
+            measures.push_back(value);
+            total += value;
+            return total / measures.size();
+        }
+        else{
+            total += value - measures[index];
+            measures[index] = value;
+            index ++;
+            if (index == measures.size())
+                index = 0;
+            return total * multiplier;
+        }
+    }
+};
+
+class Sensor
+{
+    // float _prevTime = 0;
+    KalmanFilter _kf;
+    uint8_t _sampleSize = 1;
+    bool _useKalman = false;
+    uint8_t _counter = 0;
+    float _accum_angles = 0;
+public:
+    Sensor(){}
+    Sensor(uint8_t sampleSize, bool useKalman) : _sampleSize(sampleSize), _useKalman(useKalman){}
+    // Dynamics observations;
+    virtual float angle();
+    float update(float dt)
+    {
+        float pos = 1000000;
+        _accum_angles += angle();
+        _counter ++;
+        if (_counter == _sampleSize){
+            auto ang = _accum_angles / _sampleSize;
+            // std::cout << "ang=" << ang << "\n";
+            _counter = 0; _accum_angles = 0;
+            // auto ang = angle();
+            // float t = getTime();
+            // if (_prevTime != 0)
+            {
+                // auto dt = t - _prevTime;
+                pos = ang; 
+                //auto &obs = observations;
+                // printf("obs.pos=%f pos=%f ", obs.pos, pos);
+                if (_useKalman){
+                    // printf("using Kalman\n");
+                    pos = _kf.get_pos(pos, dt);
+                }
+                // printf("pos: %2.0f\n", pos);
+                // printf("pos: %2.4f, velocity: %4.4f, acc: %6.4f, dt: %1.4f t: %1.4f ", obs.pos, obs.velocity, obs.acc, dt, t);
+                // auto newAcc = (2 * (pos - observations.pos) - observations.velocity * dt) / (dt * dt);
+                // observations.velocity += newAcc * dt;
+                // observations.acc = newAcc;
+                // observations.pos = pos;
+
+                // auto rev_dt = 1000000.f / (dt);
+                // auto newVelocity = (pos - obs.pos) * rev_dt;
+                // obs.acc = (newVelocity - obs.velocity) * rev_dt;
+                // obs.velocity = newVelocity;
+                // printf("pos: %2.4f, velocity: %4.4f, acc: %6.4f\n", obs.pos, obs.velocity, obs.acc);
+            }
+            // else 
+            // {
+            //     observations.pos = ang;
+            // }
+            // _prevTime = t;
+        }
+        return pos;
+    };
+};
+
+#include <float.h>
+
+class Engine : public Sensor
+{
+    float _duty = 0;
+public:
+    Engine();
+    void setDuty(float duty);
+    float duty(){ return _duty;}
+    virtual float angle();
+};
+
+using Eigen::seq;
+template <int Size>
+using Vector = Eigen::Vector<float, Size>;
+template <int rowSize, int colSize>
+using Matrix = Eigen::Matrix<float, rowSize, colSize>;
+#include <vector>
+Eigen::IOFormat _HeavyFmt(Eigen::FullPrecision, Eigen::DontAlignCols, " ", "\n", "", "", "\n", "");
+
+#define ZERO_LIMIT 1e-3
+#define MAT_SIZE 3 + 3 + 1
+
+bool isZero(Vector<MAT_SIZE> col){
+    return (col.array() == 0).all();
+}
+
+Dynamics observation(float pos0, float pos1, float vel0, float dt)
+{
+    // printf("pos: %2.0f\n", pos0);
+    // printf("pos: %2.4f, velocity: %4.4f, acc: %6.4f, dt: %1.4f t: %1.4f ", pos0, vel0, dt);
+    auto newAcc = (2 * (pos1 - pos0) - vel0 * dt) / (dt * dt);
+    return {pos1, vel0 + newAcc * dt, newAcc};
+}
+
+class Solver
+{
+    Sensor _sensor;
+    Engine _engine;
+    Eigen::PartialPivLU<Matrix<MAT_SIZE, MAT_SIZE>> _partialSolver;
+
+    Matrix<MAT_SIZE, MAT_SIZE + 2> _observations = Matrix<MAT_SIZE, MAT_SIZE + 2>::Zero();
+    int _height = 0;
+    float _duty = 100;
+
+    std::vector<int> _getBasisIndices()
+    {
+        Eigen::Matrix<float, Eigen::Dynamic, MAT_SIZE, Eigen::RowMajor, MAT_SIZE, MAT_SIZE> m;  
+        m = _observations.bottomLeftCorner(_height, MAT_SIZE);
+        std::vector<int> res;
+        auto i = 0;
+        for (int col = 0; col < MAT_SIZE; col++)
+        {
+            if (abs(m(i, col)) < ZERO_LIMIT)
+            {
+                for (int j = i + 1; j < _height; j++)
+                {
+                    if (abs(m(j, col)) > ZERO_LIMIT)
+                    {
+                        auto r = m.row(i).eval();
+                        m.row(i) = m.row(j);
+                        m.row(j) = r;
+                        break;
+                    }
+                }
+            }
+            if (abs(m(i, col)) >= ZERO_LIMIT)
+            {
+                res.push_back(col);
+                if (res.size() == _height)
+                    return res;
+                m.row(i) *= 1 / m(i, col);
+                for (int j = i + 1; j < _height; j++)
+                    m.row(j) -= m.row(i) * m(j, col);
+                i++;
+            }
+        }
+        return res;
+    }
+
+    int _replacedIndex(Vector<MAT_SIZE + 2> &obs)
+    {
+        Eigen::Matrix<float, MAT_SIZE, MAT_SIZE + 1, Eigen::RowMajor> rowReduce;
+        rowReduce << _observations.leftCols(MAT_SIZE).transpose(), obs.head(MAT_SIZE);
+        auto subMatSize = std::min(MAT_SIZE, _height + 1);
+        for (int i = 0; i < subMatSize; i++)
+        {
+            auto col = MAT_SIZE - i;
+            if (abs(rowReduce(i, col)) < ZERO_LIMIT)
+            {
+                for (int j = i + 1; j < MAT_SIZE; j++)
+                {
+                    if (abs(rowReduce(j, col)) > ZERO_LIMIT)
+                    {
+                        auto r = rowReduce.row(i).eval();
+                        rowReduce.row(i) = rowReduce.row(j);
+                        rowReduce.row(j) = r;
+                        break;
+                    }
+                }
+                if (abs(rowReduce(i, col)) < ZERO_LIMIT)
+                    return col;
+            }
+            rowReduce.row(i) *= 1 / rowReduce(i, col);
+            for (int j = i + 1; j < MAT_SIZE; j++)
+                rowReduce.row(j) -= rowReduce.row(i) * rowReduce(j, col);
+        }
+        return MAT_SIZE - subMatSize;
+    }
+
+    Vector<MAT_SIZE> _nextObservations(const Vector<MAT_SIZE + 2> &obs, const int index)
+    {
+        Vector<MAT_SIZE> next_values;
+        int l = _height - 1;
+        next_values.segment(MAT_SIZE - _height, l) = _observations.col(index).tail(l);
+        next_values(MAT_SIZE - 1) = obs(index);
+        return next_values;
+    }
+
+public:
+    Solver()
+    {
+        _sensor = Sensor(1, false);
+        // _engine.setDuty(100);
+    }
+
+    void changeEngineAcc()
+    {
+        auto curr_time = getTime();
+        auto prev_time = _observations(MAT_SIZE - 1, 7);
+        auto dt = curr_time - prev_time;
+        auto s = _sensor.update(dt);
+        // ESP_LOGI("", "sensor %f", s);
+        if (s == 1000000) 
+            return;
+        auto e = _engine.update(dt);
+        if (e == 1000000) 
+            return;
+        _engine.setDuty(_duty); // printf("height=%i acc=%f\n", _height, newAcc);
+        auto eng_cos = sqrtf(1 - e * e);
+        // if (eng_cos == 0 or isnan(eng_cos)) 
+            // std::cout  << "eng_cos is " << eng_cos << " " << engObs->pos << "\n";
+        Vector<MAT_SIZE + 2> obs;
+        if (prev_time != 0)
+        {
+            auto s_obs = observation(_observations(MAT_SIZE - 1, 1), s, _observations(MAT_SIZE - 1, 2), dt);
+            auto e_obs = observation(_observations(MAT_SIZE - 1, 4), e, _observations(MAT_SIZE - 1, 5), dt);
+            float d_adj;
+            if (_duty < 0) d_adj = MIN_ENGINE_PWM;
+            else d_adj = -MIN_ENGINE_PWM;
+            obs << (_duty + d_adj) * eng_cos, s, s_obs.velocity, s_obs.acc, e, e_obs.velocity, e_obs.acc, curr_time, _engine.duty() / 100.; 
+        }
+        else 
+        {
+            obs << 0, s, 0, 0, e, 0, 0, curr_time, _engine.duty() / 100.; 
+        }
+        if (isZero(obs.head(MAT_SIZE)))
+            return;
+        float newAcc = NAN;
+        int ri;
+        if (_height == MAT_SIZE)
+        {
+            _partialSolver.compute(_observations.leftCols(MAT_SIZE));
+            Matrix<MAT_SIZE, 3> ratios;
+            for (int i = 0; i < 3; i++)
+            {
+                auto sensData = _nextObservations(obs, i + 1);
+                ratios.col(i) = _partialSolver.solve(sensData);
+            }
+            int l = MAT_SIZE - 1;
+            Vector<3> b; b.noalias() = ratios.transpose().rightCols(l) * obs.segment(1, l);
+            Vector<3> a = ratios.row(0);
+            newAcc = - b.dot(a) / a.dot(a);
+            // std::cout << _observations.format(_HeavyFmt);
+            // std::cout << obs.transpose().format(_HeavyFmt) << " " << newAcc << "\n";
+            // std::cout << a.transpose().format(_HeavyFmt) << "\n";
+            // std::cout << b.transpose().format(_HeavyFmt) << "\n";
+            // std::cout << ratios.transpose().format(_HeavyFmt) << "\n";
+        }
+        else
+        {
+            if (_height > 1)
+            {
+                auto ind = _getBasisIndices(); // basis indices
+                auto obsBasis = _observations.bottomLeftCorner(_height, MAT_SIZE)(Eigen::all, ind);
+                auto dynSolver = obsBasis.partialPivLu();
+                Eigen::Matrix<float, Eigen::Dynamic, 3, 0, MAT_SIZE> ratios(_height, 3);
+                for (int i = 0; i < 3; i++)
+                {
+                    auto sensData = _nextObservations(obs, i + 1).bottomRows(_height);
+                    ratios.col(i) = dynSolver.solve(sensData);
+                }
+                int l = _height - 1;
+                Vector<3> b; b.noalias() = ratios.transpose().rightCols(l) * obs(ind).tail(l);
+                Vector<3> a = ratios.row(0);
+                newAcc = - b.dot(a) / a.dot(a);
+            }
+        }
+        ri = _replacedIndex(obs);
+        if (_height < MAT_SIZE && ri < MAT_SIZE - _height)
+            _height++;
+        for (int i = ri; i < MAT_SIZE - 1; i++)
+        {
+            _observations.row(i) = _observations.row(i + 1);
+        }
+        _observations.row(MAT_SIZE - 1) = obs.transpose();
+        if (!isnan(newAcc))
+        {
+            _duty = newAcc / eng_cos;
+            if (_duty < 0) _duty -= MIN_ENGINE_PWM;
+            else _duty += MIN_ENGINE_PWM;
+            _duty = constrain(_duty, -100, 100);
+            std::cout << obs.transpose().format(_HeavyFmt) << " " << newAcc << " " << _duty << " " << eng_cos;// << "\n";
+            // std::cout << ratios.transpose().format(_HeavyFmt);
+            // _engine.setDuty(_duty); // printf("height=%i acc=%f\n", _height, newAcc);
+        }
+        else 
+        {
+            std::cout  << " newAcc is Nan!!!\n";
+            // _engine.setDuty(0);
+        }
+        // std::cout << "\n" << getTime() - curr_time;
+    }
+
+    void test()
+    {
+        _height = 2;
+        _observations(5, 5) = 2;
+        auto res = _getBasisIndices();
+        assert(res.size() == 1 && res[0] == 5);
+
+        _observations(4, 5) = 2;
+        res = _getBasisIndices();
+        assert(res.size() == 1 && res[0] == 5);
+
+        _observations(5, 4) = 2;
+        res = _getBasisIndices();
+        assert(res.size() == 2 && res == std::vector<int>({4, 5}));
+
+        _observations(5, 3) = 2;
+        res = _getBasisIndices();
+        assert(res.size() == 2 && res == std::vector<int>({3, 5}));
+
+        _observations(4, 4) = 2;
+        res = _getBasisIndices();
+        assert(res.size() == 2 && res == std::vector<int>({3, 4}));
+        // ESP_LOGI("tests", "done!!!");
+    }
+};

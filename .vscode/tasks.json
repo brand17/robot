@@ -9,6 +9,7 @@
                 "${workspaceFolder}/main.cpp",
                 "-o",
                 "${workspaceFolder}/a.out",
+                "-I/usr/local/include/eigen-3.4.0",
                 "-lwiringPi",
                 "-lcrypt",  
                 "-lrt"
@@ -16,7 +17,21 @@
             "options": {
                 "cwd": "/usr/bin"
             }
-        }
+        },
+        {
+            "type": "shell",
+            "label": "build_arm_remote",
+            "command": "${workspaceFolder}/remote_build.sh",
+            "args": [   
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+              },
+                    "options": {
+                "cwd": "/usr/bin"
+            }
+        },
     ],
     "version": "2.0.0"
 }
