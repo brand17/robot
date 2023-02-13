@@ -402,6 +402,6 @@ public:
         _observations(4, 4) = 2;
         res = _getBasisIndices();
         assert(res.size() == 2 && res == std::vector<int>({3, 4}));
-        ESP_LOGI("tests", "done!!!");
+        // ESP_LOGI("tests", "done!!!");
     }
 };

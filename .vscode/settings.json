@@ -1,6 +1,7 @@
 {
     "files.associations": {
         "orangepi.h": "c",
-        "dense": "cpp"
+        "dense": "cpp",
+        "core": "cpp"
     }
 }

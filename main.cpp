@@ -64,8 +64,9 @@ void Engine::setDuty(float duty){
 
 #define I2C_ADDRESS_GEO 0x20 // rm3100
 #define AS5600_SLAVE_ADDR 0x36
+auto fd_rm3100 = wiringPiI2CSetupInterface("/dev/i2c-3", I2C_ADDRESS_GEO);
 
-float angles_rm3100(int fd_rm3100){
+float angles_rm3100(){
     // printf("core is %i ", xPortGetCoreID());
 	uint8_t data[9];
     do
@@ -109,8 +110,9 @@ float Sensor::angle(){
 }
 
 #define AS5600_ANGLE_REGISTER_H 0x0E
+auto fd_as5600 = wiringPiI2CSetupInterface("/dev/i2c-3", AS5600_SLAVE_ADDR);
 
-static float read_angle_AS5600(int fd_rm3100) 
+static float read_angle_AS5600() 
 {
     uint16_t raw;
     raw = wiringPiI2CReadReg16(fd_rm3100, AS5600_ANGLE_REGISTER_H);
@@ -135,7 +137,6 @@ Solver solver;
 
 int main()
     {
-        auto fd_rm3100 = wiringPiI2CSetupInterface("/dev/i2c-3", I2C_ADDRESS_GEO);
         // auto fd_rm3100 = wiringPiI2CSetup(I2C_ADDRESS_GEO);
         wiringPiI2CWriteReg8(fd_rm3100, 0x01, 0x41); // initialize continous
         wiringPiI2CWriteReg8(fd_rm3100, 0x0b, 0x96); // TMRC 600Hz
@@ -148,16 +149,15 @@ int main()
         // write_i2c_register(0x09, 0x64); // CCZ 100 cycles = 850Hz
         // write_i2c_register(0x0B, 0x96); // TMRC 600Hz
 
-        auto fd_as5600 = wiringPiI2CSetupInterface("/dev/i2c-3", AS5600_SLAVE_ADDR);
         // auto fd5 = wiringPiI2CSetupInterface("/dev/i2c-5", I2C_ADDRESS_GEO);
 
-        // while (true)
-        // {
-        //     // auto a = read_angle_AS5600(fd_as5600);
-        //     auto a = angles_rm3100(fd_rm3100);
-        //     printf("%f\n", a);
-        //     usleep(100000);
-        // }
+        while (true)
+        {
+            // auto a = read_angle_AS5600(fd_as5600);
+            auto a = angles_rm3100();
+            printf("%f\n", a);
+            usleep(100000);
+        }
 
         // for (float d = 1000; d > -1000; d--)
         // {
