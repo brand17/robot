@@ -9,8 +9,8 @@
 #include "robot.hpp"
 #include <ctime>
 
-#define L298N_IN2 6
-#define PWM_PIN 4
+#define L298N_IN2 6 // phys 12
+#define PWM_PIN 4   // phys 10
 
 #include <sys/mman.h>
 #include <fcntl.h>
@@ -153,9 +153,9 @@ int main()
 
         while (true)
         {
-            // auto a = read_angle_AS5600(fd_as5600);
-            auto a = angles_rm3100();
-            printf("%f\n", a);
+            auto a = read_angle_AS5600();
+            auto b = angles_rm3100();
+            printf("%f %f\n", a, b);
             usleep(100000);
         }
 
