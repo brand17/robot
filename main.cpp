@@ -7,7 +7,7 @@
 #include <unistd.h>
 #include <math.h>
 #include "robot.hpp"
-#include <ctime>
+#include <chrono>
 
 #define L298N_IN2 6 // phys 12
 #define PWM_PIN 4   // phys 10
@@ -31,8 +31,11 @@ void brushed_motor_set_duty(float duty_cycle)
     }
 }
 
-float getTime(){
-    return std::time(nullptr);
+uint64_t getTime()
+{
+    using namespace std::chrono;
+    auto a = duration_cast<nanoseconds>(system_clock::now().time_since_epoch()).count();
+    return a;
 }
 
 Engine::Engine(){
@@ -115,7 +118,7 @@ auto fd_as5600 = wiringPiI2CSetupInterface("/dev/i2c-3", AS5600_SLAVE_ADDR);
 static float read_angle_AS5600() 
 {
     uint16_t raw;
-    raw = wiringPiI2CReadReg16(fd_rm3100, AS5600_ANGLE_REGISTER_H);
+    raw = wiringPiI2CReadReg16(fd_as5600, AS5600_ANGLE_REGISTER_H);
     raw = __builtin_bswap16(raw);
 
     float a = float((raw + 4096 + 2048 - 347) % 4096 - 2048); 
@@ -139,7 +142,7 @@ int main()
     {
         // auto fd_rm3100 = wiringPiI2CSetup(I2C_ADDRESS_GEO);
         wiringPiI2CWriteReg8(fd_rm3100, 0x01, 0x41); // initialize continous
-        wiringPiI2CWriteReg8(fd_rm3100, 0x0b, 0x96); // TMRC 600Hz
+        wiringPiI2CWriteReg8(fd_rm3100, 0x0b, 0x92); // TMRC 600Hz
         // write_i2c_register(0x01, 0x41); // initialize continous
         // write_i2c_register(0x04, 0x00); // CCX
         // write_i2c_register(0x05, 0x00); // CCX
@@ -153,10 +156,11 @@ int main()
 
         while (true)
         {
-            auto a = read_angle_AS5600();
+            // auto a = 0.;//read_angle_AS5600();
             auto b = angles_rm3100();
-            printf("%f %f\n", a, b);
-            usleep(100000);
+            printf("%f %li\n", b, getTime());
+            // printf("%f %f %li\n", a, b, getTime());
+            // usleep(100000);
         }
 
         // for (float d = 1000; d > -1000; d--)

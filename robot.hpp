@@ -5,9 +5,10 @@
 #ifndef ARDUINO
 #define constrain(amt, low, high) ((amt) < (low) ? (low) : ((amt) > (high) ? (high) : (amt)))
 #endif
-#define MIN_ENGINE_PWM 30
+#define MAX_ENGINE_PWM 0xffff
+#define MIN_ENGINE_PWM MAX_ENGINE_PWM * 0.3
 
-float getTime();
+uint64_t getTime();
 
 template <typename T>
 int sgn(T val)
@@ -174,7 +175,7 @@ using Vector = Eigen::Vector<float, Size>;
 template <int rowSize, int colSize>
 using Matrix = Eigen::Matrix<float, rowSize, colSize>;
 #include <vector>
-Eigen::IOFormat _HeavyFmt(Eigen::FullPrecision, Eigen::DontAlignCols, " ", "\n", "", "", "\n", "");
+Eigen::IOFormat _HeavyFmt(Eigen::FullPrecision, 0, " ", "\n", "", "", "\n", "");
 
 #define ZERO_LIMIT 1e-3
 #define MAT_SIZE 3 + 3 + 1
@@ -199,7 +200,8 @@ class Solver
 
     Matrix<MAT_SIZE, MAT_SIZE + 2> _observations = Matrix<MAT_SIZE, MAT_SIZE + 2>::Zero();
     int _height = 0;
-    float _duty = 100;
+    float _duty = MAX_ENGINE_PWM;
+    uint64_t _currTime = 0, _prevTime;
 
     std::vector<int> _getBasisIndices()
     {
@@ -284,9 +286,11 @@ public:
 
     void changeEngineAcc()
     {
-        auto curr_time = getTime();
-        auto prev_time = _observations(MAT_SIZE - 1, 7);
-        auto dt = curr_time - prev_time;
+        _prevTime = _currTime;
+        _currTime = getTime();
+        // auto prev_time = _observations(MAT_SIZE - 1, 7);
+        auto dt = (_currTime - _prevTime) / 1000000.;
+        printf("%f\n", dt);
         auto s = _sensor.update(dt);
         // ESP_LOGI("", "sensor %f", s);
         if (s == 1000000) 
@@ -294,23 +298,24 @@ public:
         auto e = _engine.update(dt);
         if (e == 1000000) 
             return;
+        // printf("%f %f %f\n", s, e, _duty);
         _engine.setDuty(_duty); // printf("height=%i acc=%f\n", _height, newAcc);
         auto eng_cos = sqrtf(1 - e * e);
         // if (eng_cos == 0 or isnan(eng_cos)) 
             // std::cout  << "eng_cos is " << eng_cos << " " << engObs->pos << "\n";
         Vector<MAT_SIZE + 2> obs;
-        if (prev_time != 0)
+        if (_prevTime != 0)
         {
             auto s_obs = observation(_observations(MAT_SIZE - 1, 1), s, _observations(MAT_SIZE - 1, 2), dt);
             auto e_obs = observation(_observations(MAT_SIZE - 1, 4), e, _observations(MAT_SIZE - 1, 5), dt);
             float d_adj;
             if (_duty < 0) d_adj = MIN_ENGINE_PWM;
             else d_adj = -MIN_ENGINE_PWM;
-            obs << (_duty + d_adj) * eng_cos, s, s_obs.velocity, s_obs.acc, e, e_obs.velocity, e_obs.acc, curr_time, _engine.duty() / 100.; 
+            obs << (_duty + d_adj) * eng_cos, s, s_obs.velocity, s_obs.acc, e, e_obs.velocity, e_obs.acc, _currTime, _engine.duty() / 100.; 
         }
         else 
         {
-            obs << 0, s, 0, 0, e, 0, 0, curr_time, _engine.duty() / 100.; 
+            obs << 0, s, 0, 0, e, 0, 0, _currTime, _engine.duty() / 100.; 
         }
         if (isZero(obs.head(MAT_SIZE)))
             return;
@@ -354,6 +359,7 @@ public:
                 newAcc = - b.dot(a) / a.dot(a);
             }
         }
+        // std::cout << _observations.format(_HeavyFmt);
         ri = _replacedIndex(obs);
         if (_height < MAT_SIZE && ri < MAT_SIZE - _height)
             _height++;
@@ -367,8 +373,8 @@ public:
             _duty = newAcc / eng_cos;
             if (_duty < 0) _duty -= MIN_ENGINE_PWM;
             else _duty += MIN_ENGINE_PWM;
-            _duty = constrain(_duty, -100, 100);
-            std::cout << obs.transpose().format(_HeavyFmt) << " " << newAcc << " " << _duty << " " << eng_cos;// << "\n";
+            _duty = constrain(_duty, -MAX_ENGINE_PWM, MAX_ENGINE_PWM);
+            // std::cout << obs.transpose().format(_HeavyFmt) << " " << newAcc << " " << _duty << " " << eng_cos;// << "\n";
             // std::cout << ratios.transpose().format(_HeavyFmt);
             // _engine.setDuty(_duty); // printf("height=%i acc=%f\n", _height, newAcc);
         }
@@ -377,6 +383,7 @@ public:
             std::cout  << " newAcc is Nan!!!\n";
             // _engine.setDuty(0);
         }
+        // std::cout << obs.transpose().format(_HeavyFmt) << " " << newAcc << " " << _duty << " " << eng_cos << "\n";
         // std::cout << "\n" << getTime() - curr_time;
     }
 
