@@ -80,7 +80,7 @@ float angles_rm3100(){
         {
             // ESP_LOGI("", "waiting status");
             // write_i2c_register(0x01, 0x41); // continuous mode
-            wiringPiI2CWriteReg8(fd_rm3100, 0x01, 0x41); // initialize continous 
+            // wiringPiI2CWriteReg8(fd_rm3100, 0x01, 0x41); // initialize continous 
         }
     } while ((data[0] & 0x80) != 0x80);
 
@@ -142,7 +142,8 @@ int main()
     {
         // auto fd_rm3100 = wiringPiI2CSetup(I2C_ADDRESS_GEO);
         wiringPiI2CWriteReg8(fd_rm3100, 0x01, 0x41); // initialize continous
-        wiringPiI2CWriteReg8(fd_rm3100, 0x0b, 0x92); // TMRC 600Hz
+        // wiringPiI2CWriteReg8(fd_rm3100, 0x0b, 0x92); // TMRC 600Hz
+        wiringPiI2CWriteReg8(fd_rm3100, 0x0b, 0x93); // TMRC 300Hz
         // write_i2c_register(0x01, 0x41); // initialize continous
         // write_i2c_register(0x04, 0x00); // CCX
         // write_i2c_register(0x05, 0x00); // CCX
@@ -151,17 +152,22 @@ int main()
         // write_i2c_register(0x08, 0x00); // CCZ
         // write_i2c_register(0x09, 0x64); // CCZ 100 cycles = 850Hz
         // write_i2c_register(0x0B, 0x96); // TMRC 600Hz
+        auto fd3100 = open ("/dev/mem", O_RDWR | O_SYNC | O_CLOEXEC);
+	    auto _0x05002000 = (uint32_t *)mmap(0, 4*1024, PROT_READ | PROT_WRITE, MAP_SHARED, fd3100, 0x05002000);
+
+        printf("_0x05002c14=%x\n", *(_0x05002000 + (0xc14 >> 2))); 
+        *(_0x05002000 + (0xc14 >> 2)) = 0x00000011; // 400Hz
 
         // auto fd5 = wiringPiI2CSetupInterface("/dev/i2c-5", I2C_ADDRESS_GEO);
 
-        while (true)
-        {
-            // auto a = 0.;//read_angle_AS5600();
-            auto b = angles_rm3100();
-            printf("%f %li\n", b, getTime());
-            // printf("%f %f %li\n", a, b, getTime());
-            // usleep(100000);
-        }
+        // while (true)
+        // {
+        //     // auto a = 0.;//read_angle_AS5600();
+        //     auto b = angles_rm3100();
+        //     printf("%f %li\n", b, getTime());
+        //     // printf("%f %f %li\n", a, b, getTime());
+        //     // usleep(100000);
+        // }
 
         // for (float d = 1000; d > -1000; d--)
         // {
